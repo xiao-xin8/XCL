@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    // Node 自带的测试跑的是源码（类型剥离），相对导入必须写 `.ts` 后缀；
+    // 开了这个才能让源码里也写后缀而不被 tsc 拦下
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src", "vite.config.ts"],
+  // 测试文件用 Node 原生 test runner 跑，不装 @types/node，
+  // 所以排除在 tsc 之外（否则会报找不到 node:test 的声明）
+  "exclude": ["src/**/*.test.ts"]
+}

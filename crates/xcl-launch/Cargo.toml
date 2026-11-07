@@ -1,0 +1,19 @@
+[package]
+name = "xcl-launch"
+description = "启动逻辑：参数拼装、natives 解压、Java 探测、子进程与日志管道。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+xcl-core.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zip.workspace = true
+
+# 显卡偏好写注册表、进程优先级设 PriorityClass。都只在 Windows 上编译。
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }

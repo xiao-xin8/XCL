@@ -1,0 +1,17 @@
+[package]
+name = "xcl-auth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+description = "账号模型与第三方登录（离线 / Yggdrasil authlib-injector）"
+
+[dependencies]
+xcl-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { version = "1", features = ["v4", "serde"] }

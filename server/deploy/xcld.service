@@ -1,0 +1,49 @@
+[Unit]
+Description=XCL 账号服务（注册/登录 + 节点 TCP 桥接）
+After=network-online.target
+Wants=network-online.target
+
+# 反复崩溃时不要无限重试把机器拖垮。
+# 注意这两个键属于 [Unit] 而不是 [Service]，放错会被 systemd 静默忽略。
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=xcld
+Group=xcld
+
+# 密钥只放在这个文件里（chmod 640，属主 root:xcld）
+# 可调参数也写在这里，改完 systemctl restart xcld 即可，不用重新编译。
+EnvironmentFile=/etc/xcld/xcld.env
+
+# HTTP 只听回环，桥接对外。
+# --trust-forwarded 只在前置为可信反代时启用，否则来源 IP 可伪造。
+ExecStart=/opt/xcld/xcld serve \
+    --dir /var/lib/xcld \
+    --addr 127.0.0.1:8080 \
+    --bridge 0.0.0.0:11010 \
+    --upstream 127.0.0.1:11011 \
+    --trust-forwarded
+
+Restart=on-failure
+RestartSec=10
+
+# 主动熔断退出（exit 75）不要自动拉起，交给 xcld-recover.timer 处理。
+RestartPreventExitStatus=75
+
+# 最小权限：只允许写数据目录，其余文件系统只读
+ReadWritePaths=/var/lib/xcld
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+# 文件句柄上限。
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

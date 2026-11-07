@@ -1,0 +1,34 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# 前端
+node_modules/
+dist/
+.vite/
+
+# Tauri 生成物
+apps/desktop/src-tauri/gen/schemas/
+
+# 本地环境与配置
+.env
+.env.local
+*.log
+# 真实部署地址只在自己机器上，模板是 config.example.toml
+config.toml
+
+# Python 脚本缓存
+__pycache__/
+*.pyc
+
+# 编辑器
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 第三方二进制：不再随安装包分发，运行时由官方/BMCLAPI 下载；本地参考文件不提交
+apps/desktop/src-tauri/resources/authlib-injector.jar
+
+# 本地临时转储，代码无引用
+apps/desktop/hmcl_tree.json

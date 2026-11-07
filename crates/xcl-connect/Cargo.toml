@@ -1,0 +1,11 @@
+[package]
+name = "xcl-connect"
+description = "联机（EasyTier）：邀请码编解码、命令行拼装、CLI 输出解析、连接状态机。纯函数。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+xcl-core.workspace = true
+serde_json.workspace = true

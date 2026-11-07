@@ -1,0 +1,6 @@
+[Unit]
+Description=按冷却时间重新拉起 xcld（熔断后的恢复正常路径）
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xcld/recover.sh

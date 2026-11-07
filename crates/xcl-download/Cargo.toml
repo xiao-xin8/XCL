@@ -1,0 +1,21 @@
+[package]
+name = "xcl-download"
+description = "并发下载引擎：单文件原子落盘 + Semaphore 限流 + 进度聚合。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+xcl-core.workspace = true
+xcl-net.workspace = true
+reqwest.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+sha1.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+xcl-source.workspace = true

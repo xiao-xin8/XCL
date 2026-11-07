@@ -1,0 +1,48 @@
+[package]
+name = "xcl-service"
+description = "应用服务层：持有运行时状态（目录布局、配置、HTTP），供 Tauri 命令调用。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+xcl-core.workspace = true
+xcl-source.workspace = true
+xcl-net.workspace = true
+xcl-download.workspace = true
+xcl-launch.workspace = true
+xcl-loader.workspace = true
+xcl-auth.workspace = true
+xcl-update.workspace = true
+xcl-connect.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+base64.workspace = true
+sha1.workspace = true
+sha2.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+futures.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+zip.workspace = true
+sysinfo.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[target."cfg(windows)".dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    # 内存优化：EnumProcesses / EmptyWorkingSet
+    "Win32_System_ProcessStatus",
+    # OpenProcess
+    "Win32_System_Threading",
+    # 跳过前台窗口所在的进程（GetForegroundWindow / GetWindowThreadProcessId）
+    "Win32_UI_WindowsAndMessaging",
+    # 启用内存清理需要的特权（OpenProcessToken / LookupPrivilegeValueW / AdjustTokenPrivileges）
+    "Win32_Security",
+] }

@@ -1,0 +1,16 @@
+[package]
+name = "xcl-net"
+description = "HTTP 层：单次请求、多候选源切换、分类重试。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+xcl-core.workspace = true
+xcl-source.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+futures.workspace = true

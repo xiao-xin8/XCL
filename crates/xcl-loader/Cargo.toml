@@ -1,0 +1,14 @@
+[package]
+name = "xcl-loader"
+description = "模组加载器安装：Fabric / Forge / NeoForge。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+xcl-core.workspace = true
+xcl-net.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true

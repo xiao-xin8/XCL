@@ -1,0 +1,29 @@
+[package]
+name = "xcl-desktop"
+description = "XCL 桌面外壳：仅负责 IPC 编排，业务逻辑放在 crates/。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "xcl_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+xcl-core.workspace = true
+xcl-service.workspace = true
+xcl-launch.workspace = true
+xcl-update.workspace = true
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-window-state.workspace = true
+tauri-plugin-dialog.workspace = true
+tauri-plugin-opener.workspace = true
+tauri-plugin-single-instance.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

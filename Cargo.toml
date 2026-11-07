@@ -1,0 +1,53 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.2.1"
+edition = "2024"
+# tauri-plugin-opener 2.7.2 要求 1.90，和前端 2.7.2 对齐
+rust-version = "1.90"
+license = "MIT"
+repository = ""
+
+[workspace.dependencies]
+# 内部 crate
+xcl-core = { path = "crates/xcl-core" }
+xcl-source = { path = "crates/xcl-source" }
+xcl-net = { path = "crates/xcl-net" }
+xcl-download = { path = "crates/xcl-download" }
+xcl-launch = { path = "crates/xcl-launch" }
+xcl-loader = { path = "crates/xcl-loader" }
+xcl-service = { path = "crates/xcl-service" }
+xcl-auth = { path = "crates/xcl-auth" }
+xcl-update = { path = "crates/xcl-update" }
+xcl-connect = { path = "crates/xcl-connect" }
+
+# 第三方
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+base64 = "0.22"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "io-util", "sync", "time", "macros", "process"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "charset", "http2", "gzip", "system-proxy"] }
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+futures = "0.3"
+tokio-util = { version = "0.7", features = ["rt"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+# 读取总物理内存，给「自动内存」用；跨平台
+sysinfo = "0.33"
+tauri-plugin-window-state = "2.5.0"
+# 单实例：第二次启动聚焦已有窗口。更新流程也依赖它 —— helper 走 apply 分支，
+# 在插件初始化之前就分流，所以不会被当成「第二次启动」拦掉。
+tauri-plugin-single-instance = "2"
+# 选目录（Mod 手动安装的「自定义文件夹」）。只在 Rust 侧调用，
+# 所以 capabilities 里不需要加 dialog 权限 —— 前端调的是我们自己的命令。
+tauri-plugin-dialog = "2"
+# 打开外部链接（Mod 详情里的源码 / 问题反馈 / Wiki 等）。
+# 版本与前端 @tauri-apps/plugin-opener 保持一致，否则 CLI 会拒绝构建。
+tauri-plugin-opener = "2.7.2"
