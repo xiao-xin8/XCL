@@ -23,10 +23,9 @@ use xcl_core::AppError;
 
 use crate::AppState;
 
-/// 账号服务地址由部署方在 `config.toml` 的 `connect.accountServer` 里填。
+/// 账号服务地址是**构建期注入**的（`bake.toml` → `build.rs`），不是用户配置。
 ///
-/// 不进代码：仓库里没有默认值，自己编译的人填自己的服务端。
-/// 启动时 `AppState::new` 把配置灌进 [`CONFIGURED_SERVER`]，下面那些
+/// 启动时 `AppState::init` 把它灌进 [`CONFIGURED_SERVER`]，下面那些
 /// 不接 `AppState` 的小函数才拿得到（它们全是内部工具，传一遍参数纯噪音）。
 static CONFIGURED_SERVER: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 

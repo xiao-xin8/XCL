@@ -12,5 +12,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 md-5.workspace = true
 
+[build-dependencies]
+toml.workspace = true
+
 [dev-dependencies]
 toml.workspace = true

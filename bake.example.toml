@@ -1,0 +1,17 @@
+# 构建期注入的部署地址模板。
+#
+# 复制成 `bake.toml` 并填上自己的地址，再 `cargo tauri build`，
+# 打出来的 exe 就自带这些地址（用户不需要手动配置）。
+#
+# `bake.toml` 不在 Git 里；留空则对应功能不启用，其余功能照常。
+
+[connect]
+# 共享节点，格式 tcp://host:port
+relay = ""
+# 联机组件清单
+manifestUrl = ""
+# 账号服务
+accountServer = ""
+
+[update]
+manifestUrl = ""

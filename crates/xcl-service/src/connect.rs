@@ -126,18 +126,16 @@ impl AppState {
 
     /// 读取远端清单。
     ///
-    /// 地址来自 `config.toml` 的 `connect.manifestUrl`：部署信息不进代码。
-    /// 空着说明这个构建没有联机服务，直接说清楚，别发一个注定失败的请求。
+    /// 地址是内置的（打包时注入），空说明这个构建没有联机服务。
     async fn connect_manifest(&self) -> Result<ConnectManifest, AppError> {
-        let url = self.config().connect.manifest_url.trim().to_string();
+        let url = xcl_core::config::CONNECT_MANIFEST_ENDPOINT;
         if url.is_empty() {
             return Err(AppError::unsupported(
-                "没有配置联机服务",
-                "这个构建没有内置联机组件地址",
-            )
-            .with_hint("在config.toml的connect.manifestUrl里填上清单地址"));
+                "这个版本没有联机服务",
+                "联机组件地址没有打进这个构建",
+            ));
         }
-        let (text, _) = self.fetch_meta_text(&url).await?;
+        let (text, _) = self.fetch_meta_text(url).await?;
         ConnectManifest::parse(&text)
     }
 

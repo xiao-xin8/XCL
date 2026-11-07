@@ -16,6 +16,8 @@ apps/desktop/src-tauri/gen/schemas/
 *.log
 # 真实部署地址只在自己机器上，模板是 config.example.toml
 config.toml
+# 打包时注入进程序的部署地址，模板是 bake.example.toml
+bake.toml
 
 # Python 脚本缓存
 __pycache__/

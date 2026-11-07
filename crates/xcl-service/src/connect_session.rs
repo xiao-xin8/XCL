@@ -247,16 +247,14 @@ pub async fn start_host(
 ) -> Result<ConnectStateView, AppError> {
     ensure_stopped().await;
 
-    // 共享节点由部署方在 `config.toml` 里填（`connect.relay`）。
-    // 空着就不给开房：邀请码里的节点是好友要连的地址，编一条连不上的码
-    // 比直接说「没配置」更糟 —— 对方会一直卡在「连接中」。
-    let node = state.config().connect.relay.trim().to_string();
+    // 共享节点是内置的（打包时注入）。空着就不给开房：邀请码里的节点是
+    // 好友要连的地址，编一条连不上的码比直接说「没有」更糟 —— 对方会一直卡住。
+    let node = xcl_core::config::RELAY_ENDPOINT.to_string();
     if node.is_empty() {
         return Err(AppError::unsupported(
-            "没有配置联机节点",
-            "这个构建没有内置共享节点地址",
-        )
-        .with_hint("在config.toml的connect.relay里填上自己的节点"));
+            "这个版本没有联机节点",
+            "共享节点地址没有打进这个构建",
+        ));
     }
 
     // 房间名与密码必填：以前空着就随手生成一个，结果不知道自己的房间叫什么，

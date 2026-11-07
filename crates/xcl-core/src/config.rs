@@ -8,6 +8,25 @@ use std::path::PathBuf;
 
 use crate::kind::VersionKind;
 
+/// 打包时由 `build.rs` 从仓库根的 `bake.toml` 生成的部署地址。
+///
+/// 地址本身不进源码：仓库里只有模板 `bake.example.toml`，自己的 `bake.toml`
+/// 不入 Git。别人 clone 下来自己编译、没有这个文件时，这些常量全是空串，
+/// 对应功能就按「这个构建没有该服务」处理。
+mod baked {
+    include!(concat!(env!("OUT_DIR"), "/baked.rs"));
+}
+
+/// 这个构建内置的服务地址。
+///
+/// 它们是**程序自己的服务**，不是用户选项：打包时由 `bake.toml` 注入，
+/// 运行时没有开关、界面上也不给填。自己 clone 编译、没提供 `bake.toml` 时
+/// 全部为空串，对应功能就按「这个构建没有该服务」处理。
+pub const RELAY_ENDPOINT: &str = baked::RELAY;
+pub const CONNECT_MANIFEST_ENDPOINT: &str = baked::CONNECT_MANIFEST;
+pub const ACCOUNT_SERVER_ENDPOINT: &str = baked::ACCOUNT_SERVER;
+pub const UPDATE_MANIFEST_ENDPOINT: &str = baked::UPDATE_MANIFEST;
+
 /// 当前配置结构版本。将来做迁移时靠它判断。
 pub const CURRENT_SCHEMA: u32 = 1;
 
@@ -58,17 +77,6 @@ pub struct ConnectConfig {
     /// 只在第一次创建房间时弹，弹过就记下 —— 这是产品引导，不是状态：
     /// 不参与任何联机判定，删掉它最多让提示再弹一次。
     pub hint_seen: bool,
-    /// 共享节点的地址（`tcp://host:11010`）。
-    ///
-    /// 部署信息不进代码：仓库里默认空，自己的部署在 `config.toml` 里填。
-    /// 空着时不给邀请码 —— 生成一条连不上的码比不给更糟。
-    pub relay: String,
-    /// 联机组件清单地址。空表示这个构建没有联机服务，界面上如实说明。
-    pub manifest_url: String,
-    /// 账号服务地址（注册 / 登录 / 令牌续期）。
-    ///
-    /// 环境变量 `XCL_ACCOUNT_SERVER` 优先于它（本地联调用）。
-    pub account_server: String,
 }
 
 impl Default for ConnectConfig {
@@ -77,9 +85,6 @@ impl Default for ConnectConfig {
             room: String::new(),
             secret: String::new(),
             hint_seen: false,
-            relay: String::new(),
-            manifest_url: String::new(),
-            account_server: String::new(),
         }
     }
 }
@@ -93,8 +98,6 @@ impl Default for ConnectConfig {
 pub struct UpdateConfig {
     /// 发布频道。稳定版不把预发布当成更新。
     pub channel: UpdateChannel,
-    /// 更新清单地址。空表示这个构建不检查更新（自己编译的、别人的 fork）。
-    pub manifest_url: String,
     /// 启动后自动检查。默认开：云端发了新版就该看到。
     pub auto_check: bool,
     /// 发现新版本后自动下载。v1 恒为 false，字段先留着。
@@ -120,7 +123,6 @@ impl Default for UpdateConfig {
     fn default() -> Self {
         Self {
             channel: UpdateChannel::Stable,
-            manifest_url: String::new(),
             auto_check: true,
             auto_download: false,
             skipped_version: String::new(),
@@ -938,7 +940,7 @@ mod tests {
         assert_eq!(cfg.update.channel, UpdateChannel::Preview);
         assert!(cfg.update.channel.accepts_prerelease());
 
-        // 老配置里残留的 manifestUrl 要被静默忽略（地址已经写死在代码里）
+        // 老配置里残留的 manifestUrl 要能正常解析（默认值来自打包注入）
         let cfg: Config =
             toml::from_str("[update]\nchannel = \"stable\"\nmanifestUrl = \"https://a.example/u.json\"\n")
                 .unwrap();
@@ -972,9 +974,8 @@ mod tests {
         assert_eq!(back.update.skipped_version, "0.2.0");
         // 字段名必须是 camelCase，和项目其它配置一致
         assert!(text.contains("lastSeenVersion"));
-        // 清单地址是配置项（默认空），不再写死在代码里
-        assert!(text.contains("manifestUrl"));
-        assert!(back.update.manifest_url.is_empty());
+        // 服务地址不落配置：它是构建期注入的内置地址，配置文件里不该出现
+        assert!(!text.contains("manifestUrl"));
     }
 
     #[test]

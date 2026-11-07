@@ -175,22 +175,25 @@ Windows x64 上双击 exe 即可，不需要安装。配置和账号都放在数
 
 ### 8. 联机与自动更新需要服务端地址
 
-这两项的地址不写死在程序里，放在数据根的 `config.toml`：
+这四项的服务地址**内置在程序里**，不是用户可改的配置项：打包时由仓库根的
+`bake.toml` 注入成常量（`crates/xcl-core/build.rs` → `OUT_DIR/baked.rs`），运行时没有开关。
 
-| 配置段 | 填什么 | 不填会怎样 |
+| 内置地址 | 用在哪 | 缺失时 |
 | --- | --- | --- |
-| `[connect] relay` | 共享节点地址 | 不能创建房间 |
-| `[connect] manifestUrl` | 联机组件清单地址 | 联机页没有组件可下 |
-| `[connect] accountServer` | 账号服务地址 | 不能登录 XCL 账号 |
-| `[update] manifestUrl` | 更新清单地址 | 不检查更新 |
+| 共享节点 | 创建房间时写进邀请码 | 不能创建房间 |
+| 联机组件清单 | 联机页下载 EasyTier 组件 | 联机页没有组件可下 |
+| 账号服务 | 注册 / 登录 / 令牌续期 | 不能登录 XCL 账号 |
+| 更新清单 | 检查新版本 | 不检查更新 |
 
-仓库里的 `config.example.toml` 是模板，把这几行补进已有的 `config.toml` 即可；账号服务地址也可以用环境变量 `XCL_ACCOUNT_SERVER` 覆盖。没填时其余功能照常可用。
+**自己编译**：把 `bake.example.toml` 复制成 `bake.toml`，填上自己的地址再构建。
+`bake.toml` 含真实部署信息，不进 Git。不填也能编，只是这四项按「该构建没有对应服务」
+处理，其余功能照常。账号服务地址还可以用环境变量 `XCL_ACCOUNT_SERVER` 临时覆盖（本地联调用）。
 
 ## 说明
 
 - 目前面向 Windows x64；联机组件清单只放行 win-x64。
 - 不支持微软登录；进游戏用离线账号或第三方 Yggdrasil 账号。
-- 联机与自动更新依赖上面第 8 节的服务端地址，默认配置里为空。
+- 联机与自动更新的服务地址打进程序里，仓库里不含这些地址（`bake.toml` 不进 Git）。
 
 问题反馈：https://github.com/xiao-xin8/XCL/issues
 
