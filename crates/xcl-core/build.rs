@@ -4,7 +4,8 @@
 //! 信息（`bake.toml` 不进 Git）。别人 clone 下来自己编、没有这个文件时，
 //! 生成的常量是空字符串，对应功能就按「这个构建没有该服务」处理。
 //!
-//! 改了 `bake.toml` 不会自动重编 —— 得碰一下本文件，或者 `cargo clean -p xcl-core`。
+//! 改了 `bake.toml` 会自动重编这个 crate（下面有 `rerun-if-changed`）。
+//! 但如果只改了别的东西、怀疑地址没生效，`cargo clean -p xcl-core` 最稳。
 
 use std::path::PathBuf;
 

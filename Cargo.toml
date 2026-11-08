@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 # tauri-plugin-opener 2.7.2 要求 1.90，和前端 2.7.2 对齐
 rust-version = "1.90"

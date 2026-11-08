@@ -79,7 +79,7 @@ TCP 连上 `节点:11010`，**先发一帧**：
 ```
 magic  "XCL1"   4 字节
 长度   令牌文本长度（大端 u16）
-载荷   令牌（base64url 文本，118 字节）
+载荷   令牌（base64url 文本，130 字节 = 97 字节原始令牌）
 ```
 
 - 通过 → 服务端回 1 个字节 `0x00`，之后就是 easytier 的裸 TCP 隧道
@@ -91,14 +91,82 @@ magic  "XCL1"   4 字节
 
 ## 部署
 
+### 一次性清单
+
+- **机器**：Debian / Ubuntu，x86_64。1 vCPU / 1 GB 起就够（实测 2 GB 跑得富余，
+  只有信令时 RSS 约 50 MB）。
+- **依赖**：easytier core 必须先起来，并且**只监听 `127.0.0.1:11011`、只开 TCP**
+  （`-l tcp://127.0.0.1:11011`）。11010 是 xcld 的地盘。
+- **端口**：`11010/tcp` 对外，**云侧安全组和主机侧防火墙都要放行**，少一处就是连不上；
+  HTTP 只监听回环，不对外。
+- **两个对外入口**：账号接口走隧道 / CDN（橙云，HTTPS），桥接走**灰云域名**（DNS only）。
+
+### 安装
+
 ```bash
-./deploy/install.sh root@<服务器地址>
+./deploy/install.sh root@<服务器地址> [HTTP 端口，默认 8080]
 ```
 
 脚本会交叉编译（纯 Go，无 CGO）、装到 `/opt/xcld`、建系统账号 `xcld`、
 首次安装时生成密钥写到 `/etc/xcld/xcld.env`、装 systemd 服务并启动。
 
+**端口别想当然用 8080** —— 面板、语音、反代都爱占它，撞上就换一个（比如 8081）。
+端口是参数，脚本会同时改 unit 和自检地址；但 **`cloudflared` 的 ingress 不会自动改**，
+换端口后要去面板同步，否则域名还打在旧端口上。
+
 **公钥要写进客户端**（`grep XCL_SIGN_PUBKEY /etc/xcld/xcld.env`）。
+
+### 桥接地址为什么给域名，而不是 IP
+
+桥接地址由服务端下发（`XCL_BRIDGE_ADVERTISE`），客户端拿到就一直用它。两种写法：
+
+| 写法 | 换机器时 |
+|---|---|
+| 裸 IP `1.2.3.4:11010` | 客户端地址是**构建期注入**的，必须重新打包 + 强制升级；老客户端还会连到旧机器 |
+| 灰云域名 `bridge.example.com:11010` | **只改一条 A 记录**，客户端一个字节都不用动 |
+
+所以生产上用域名。三条硬要求：
+
+1. **必须灰云（DNS only）**，橙云会把 11010 指向 CDN 边缘节点，永远连不上；
+2. **不要给这个子域加 AAAA**。客户端解析只取第一条结果（`lookup_host` 的
+   `next()`），有 IPv6 先返回就会试着连一个封着的端口；
+3. TTL 别给太长，换机器时等待时间就是 TTL。
+
+### 换机器 / 迁移
+
+换机器**不是重装一遍**那么简单，有两样东西必须原样搬过去，其余都可重来：
+
+```bash
+# 1. 旧机上留一份密钥和数据库（数据库先停服务，或者用 sqlite3 .backup 保一致）
+scp old:/etc/xcld/xcld.env    new:/tmp/xcld.env.import
+scp old:/var/lib/xcld/xcl.db  new:/tmp/xcl.db.import
+
+# 2. 在新机上装（脚本见到这两个文件就导入，不会重新生成密钥）
+./deploy/install.sh root@<新服务器> 8081
+
+# 3. 改桥接对外地址，重启
+ssh root@<新服务器> 'sed -i "s#^XCL_BRIDGE_ADVERTISE=.*#XCL_BRIDGE_ADVERTISE=bridge.example.com:11010#" /etc/xcld/xcld.env && systemctl restart xcld'
+
+# 4. DNS 换 A 记录（灰云），等生效
+```
+
+- **密钥必须搬**：客户端内置的是公钥，换了密钥等于所有人「令牌无效」。
+- **数据库要搬**：`sessions` 表是「封号 / 改密码能立刻作废」的唯一依据，丢了还是能登录，
+  但旧令牌就跟没有记录一样飘着。
+- **旧机上仍需 `easytier core` 在 `127.0.0.1:11011`** 等着，否则桥接连上了没人接。
+- 新机就位后**建议先双跑一段时间**再停旧机：老客户端本地存的还是旧 IP，
+  要等它续期（令牌剩 7 天时）才会换成新地址。
+
+### 验证（换机后逐条过一遍）
+
+```bash
+curl -fsS http://127.0.0.1:8081/v1/health          # 账号数、在线会话数
+curl -fsS https://api.example.com/v1/captcha       # 隧道通了才有
+nc -w 3 <新机> 11010 </dev/null                    # 带垃圾令牌应被零字节关闭
+ss -lntup | grep 11010                             # 只有 xcld 在听，且没有 udp
+```
+
+再在客户端真开一次房：`peer list` 里应该看到共享节点、`cost=p2p`。
 
 ### 环境变量
 

@@ -5548,7 +5548,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-auth"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -5561,7 +5561,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-connect"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "xcl-core",
@@ -5569,7 +5569,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-core"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "md-5",
  "serde",
@@ -5580,7 +5580,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-desktop"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5600,7 +5600,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-download"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
@@ -5616,7 +5616,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-launch"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "thiserror 2.0.21",
  "tokio",
@@ -5629,7 +5629,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-loader"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5640,7 +5640,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-net"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
@@ -5653,7 +5653,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-service"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -5682,11 +5682,11 @@ dependencies = [
 
 [[package]]
 name = "xcl-source"
-version = "0.2.2"
+version = "0.3.0"
 
 [[package]]
 name = "xcl-update"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
