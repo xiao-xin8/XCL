@@ -18,6 +18,7 @@
 
 pub mod apply;
 pub mod args;
+pub mod changelog;
 pub mod cleanup;
 pub mod log;
 pub mod manifest;
@@ -36,6 +37,7 @@ mod testutil;
 
 pub use apply::{try_apply_pending, try_run, NEW_ALIVE_WATCH, OLD_EXIT_TIMEOUT};
 pub use args::{has_updated_flag, parse_apply_args, ApplyArgs, APPLY_FLAG, UPDATED_FLAG};
+pub use changelog::{Changelog, ChangelogRelease};
 pub use cleanup::{run as cleanup_leftovers, CleanupReport};
 pub use manifest::{
     parse_version, ArchiveArtifact, Channel, CheckResult, CheckState, ExeArtifact, Manifest, Severity,

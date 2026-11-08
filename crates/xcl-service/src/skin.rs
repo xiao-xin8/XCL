@@ -4,7 +4,9 @@
 //!
 //! 1. 第三方账号：`GET {服务器}/sessionserver/session/minecraft/profile/{uuid}`
 //!    → `properties` 里找 `textures` → base64 解出 `{SKIN:{url,metadata},CAPE:{url}}`
-//! 2. 离线账号：没有服务器皮肤，用内置默认皮肤。1.19.2 及更早按 UUID
+//! 2. 微软账号：`GET https://sessionserver.mojang.com/session/minecraft/profile/{uuid}`
+//!    （官方 sessionserver，路径没有 `/sessionserver` 前缀），解析同上
+//! 3. 离线账号：没有服务器皮肤，用内置默认皮肤。1.19.2 及更早按 UUID
 //!    奇偶选 Steve / Alex；1.19.3+ 游戏改成
 //!    按 `floorMod(UUID.hashCode(), 18)` 从 9 套皮肤 × 宽/细里选，启动时
 //!    调整 UUID 末 5 位命中目标下标。
@@ -364,19 +366,18 @@ fn write_index(layout: &PathLayout, uuid: &str, index: &SkinIndex) {
     }
 }
 
-/// 拉一个 UUID 的 profile 并解出 textures。失败返回 `None`（调用方回落默认皮肤）。
-async fn fetch_textures(server_url: &str, uuid: &str) -> Option<ResolvedTextures> {
+/// 拉一个 profile 端点并解出 textures。失败返回 `None`（调用方回落默认皮肤）。
+///
+/// `profile_url` 是完整的 profile 地址（各账号类型的路径形态不同，
+/// 由调用方拼好）。
+async fn fetch_textures(profile_url: &str) -> Option<ResolvedTextures> {
     let http = reqwest::Client::builder()
         .user_agent(format!("XCL/{} (skin)", env!("CARGO_PKG_VERSION")))
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .ok()?;
-    let url = format!(
-        "{}/sessionserver/session/minecraft/profile/{uuid}",
-        server_url.trim_end_matches('/')
-    );
-    let resp = http.get(&url).send().await.ok()?;
+    let resp = http.get(profile_url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -452,10 +453,27 @@ impl AppState {
             return default_render(None, None);
         };
         // 离线账号没有服务器皮肤，直接发玩家选的默认皮肤
-        if !account.is_authlib() {
+        if account.kind == xcl_auth::AccountKind::Offline {
             return default_render(Some(&account.uuid), account.skin_model);
         }
-        let Some(server_url) = account.server_url.clone() else {
+        // 皮肤档案端点按账号类型分流（PCL `ModMinecraft.vb:1405` 同款思路）：
+        // - 第三方：自己服务器的 sessionserver（`{根}/sessionserver/session/…`）
+        // - 微软正版：Mojang 官方 sessionserver（路径**没有** /sessionserver 前缀）
+        let profile_url = match account.kind {
+            xcl_auth::AccountKind::Authlib => account.server_url.as_ref().map(|s| {
+                format!(
+                    "{}/sessionserver/session/minecraft/profile/{}",
+                    s.trim_end_matches('/'),
+                    account.uuid
+                )
+            }),
+            xcl_auth::AccountKind::Microsoft => Some(format!(
+                "https://sessionserver.mojang.com/session/minecraft/profile/{}",
+                account.uuid
+            )),
+            xcl_auth::AccountKind::Offline => None,
+        };
+        let Some(profile_url) = profile_url else {
             return default_render(Some(&account.uuid), None);
         };
 
@@ -467,7 +485,7 @@ impl AppState {
                 cape_url: index.cape_url,
                 model: SkinModel::from_metadata(index.model.as_deref()),
             },
-            None => match fetch_textures(&server_url, &account.uuid).await {
+            None => match fetch_textures(&profile_url).await {
                 Some(resolved) => {
                     write_index(
                         &self.layout,

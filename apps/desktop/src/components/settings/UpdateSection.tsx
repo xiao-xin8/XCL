@@ -1,10 +1,13 @@
-import { Box, Button, Chip, Stack, Typography, alpha } from "@mui/material";
+import { useState } from "react";
+import { Box, Button, Chip, Stack, alpha } from "@mui/material";
 import type { ConfigPatch } from "../../lib/config";
 import { BUTTON_SX } from "../../lib/buttons";
 import type { AppConfig, UpdateChannel, UpdateView } from "../../lib/types";
 import { useUpdateActions, useUpdateState } from "../../lib/updateContext";
+import ChangelogList, { ChangelogLines } from "../ChangelogList";
 import SettingGroup from "./SettingGroup";
 import SettingRow from "./SettingRow";
+import Reveal from "./Reveal";
 import { SelectRow, SwitchRow } from "./controls";
 
 const CHANNELS: { value: UpdateChannel; label: string }[] = [
@@ -33,6 +36,8 @@ export default function UpdateSection(props: {
   const phase = view?.phase ?? "idle";
   const current = view?.currentVersion ?? "0.1.0";
   const busy = phase === "checking" || phase === "downloading" || phase === "verifying";
+
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
     <>
@@ -77,34 +82,32 @@ export default function UpdateSection(props: {
       {(view?.changelog.length ?? 0) > 0 && phase === "available" && (
         <SettingGroup title={`${view?.latestVersion ?? ""} 更新内容`}>
           <Box sx={{ px: 2, py: 1.5 }}>
-            <Stack component="ul" sx={{ m: 0, pl: 0, listStyle: "none", gap: 0.75 }}>
-              {view?.changelog.map((line, index) => (
-                <Stack
-                  component="li"
-                  key={index}
-                  direction="row"
-                  sx={{ gap: 1, alignItems: "flex-start" }}
-                >
-                  <Box
-                    aria-hidden
-                    sx={{
-                      width: 5,
-                      height: 5,
-                      mt: "8px",
-                      flexShrink: 0,
-                      borderRadius: "50%",
-                      bgcolor: "primary.main",
-                    }}
-                  />
-                  <Typography sx={{ fontSize: 12, lineHeight: 1.75, color: "text.secondary" }}>
-                    {line}
-                  </Typography>
-                </Stack>
-              ))}
-            </Stack>
+            <ChangelogLines lines={view?.changelog ?? []} />
           </Box>
         </SettingGroup>
       )}
+
+      <SettingGroup
+        title="更新日志"
+        desc="每个正式版本改了什么；只记录已发布的版本，展开时从云端取一次。"
+      >
+        <Box>
+          <SettingRow title="历史版本" desc="从 0.3.0 开始记录。">
+            <Button
+              variant="outlined"
+              onClick={() => setHistoryOpen((open) => !open)}
+              sx={BUTTON_SX}
+            >
+              {historyOpen ? "收起" : "查看"}
+            </Button>
+          </SettingRow>
+          <Reveal open={historyOpen}>
+            <Box sx={{ px: 2, pb: 1.5 }}>
+              <ChangelogList active={historyOpen} />
+            </Box>
+          </Reveal>
+        </Box>
+      </SettingGroup>
 
       <SettingGroup title="更新设置">
         <SwitchRow

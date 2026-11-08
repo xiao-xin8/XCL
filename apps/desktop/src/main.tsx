@@ -6,6 +6,49 @@ import { setAppearance } from "./lib/appearance";
 import type { AppConfig } from "./lib/types";
 
 /**
+ * 挡掉「像网页」的那几个默认行为。
+ *
+ * Tauri 的窗口本质是一个内嵌 WebView2 —— 浏览器认为自己在浏览网页，所以：
+ *   - 右键会弹出「重新加载 / 另存为 / 检查」这套菜单，在启动器里既没用又出戏；
+ *   - F5 / Ctrl+R 会真的整页重载，前端状态全丢（Rust 那边的下载任务还在跑，
+ *     界面却回到首页），这是会让人以为「卡死了」的那种问题；
+ *   - Ctrl+P / Ctrl+U 更没意义。
+ *
+ * 但不该一刀切：输入框和可编辑区域要留住原生右键菜单，那是唯一能右键复制粘贴的地方。
+ * F12 / Ctrl+Shift+I 故意不拦，dev 下还要开调试台。
+ */
+function blockBrowserDefaults(): void {
+  window.addEventListener("contextmenu", (event) => {
+    const target = event.target;
+    const editable =
+      target instanceof Element && target.closest('input, textarea, [contenteditable="true"]');
+    if (!editable) event.preventDefault();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "F5") {
+      event.preventDefault();
+      return;
+    }
+    if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) return;
+    const key = event.key.toLowerCase();
+    if (key === "r" || key === "p" || key === "u") event.preventDefault();
+  });
+
+  // 图片（皮肤、图标）默认能被拖出来，跟着光标飘一张幽灵图，很网页
+  window.addEventListener("dragstart", (event) => event.preventDefault());
+
+  // Ctrl+滚轮是浏览器的缩放，会把整个界面连布局一起缩小放大，必须掐掉
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (event.ctrlKey) event.preventDefault();
+    },
+    { passive: false },
+  );
+}
+
+/**
  * 先把配置读回来，再挂载界面。
  *
  * 之前是「先渲染启动页 → config_get 回来再 setNav」：第一帧必定是首页，
@@ -53,4 +96,6 @@ async function bootstrap(): Promise<void> {
   );
 }
 
+// 先关掉浏览器的默认交互，再渲染 —— 顺序反了第一帧右键就能弹出来
+blockBrowserDefaults();
 void bootstrap();

@@ -201,9 +201,27 @@ export default function AdvancedSection(props: {
     async (kind: string) => {
       setClearing(kind);
       try {
-        await invoke("storage_clear", { kind });
-        await loadCache();
-        toast("缓存已清理", "success");
+        const result = await invoke<{ freed: number; pending: boolean }>("storage_clear", { kind });
+        if (result.pending) {
+          // 界面内核的缓存运行时删会把前端带崩，后台只登记了清理请求。
+          // 直接重启：新进程刚起来、WebView2 还没创建时才会真正动手清。
+          // 留一点时间让提示看得见；万一重启没成功，标记还在，下次启动照样清。
+          toast("正在重启以清理浏览器缓存…", "success");
+          window.setTimeout(() => {
+            void (async () => {
+              try {
+                await invoke("restart_app");
+              } catch (e: unknown) {
+                // 比如还有下载在跑：重启被拦下，但清理已登记，下次启动照样清
+                const err = toAppError(e, "重启失败");
+                toast(`${err.title}：${err.message}`, "error");
+              }
+            })();
+          }, 1200);
+        } else {
+          await loadCache();
+          toast("缓存已清理", "success");
+        }
       } catch (e: unknown) {
         const err = toAppError(e, "清理缓存失败");
         toast(`${err.title}：${err.message}`, "error");
@@ -293,7 +311,7 @@ export default function AdvancedSection(props: {
             打开
           </Button>
         </ActionRow>
-        <ActionRow title="缓存目录" desc="下载缓存、皮肤图、半截文件。不进便携包，删了不心疼。">
+        <ActionRow title="缓存目录" desc="下载缓存、皮肤图、半截文件。浏览器内核缓存不在这里。">
           <Button size="small" variant="outlined" onClick={() => void openDir("cache")}>
             打开
           </Button>
@@ -328,7 +346,7 @@ export default function AdvancedSection(props: {
             />
           ))
         )}
-        <ActionRow title="全部清理" desc="三类缓存一起清。">
+        <ActionRow title="全部清理" desc="所有缓存一起清。">
           <Button
             size="small"
             color="error"

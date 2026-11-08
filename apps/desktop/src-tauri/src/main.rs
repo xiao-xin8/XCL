@@ -18,5 +18,9 @@ fn main() {
         return;
     }
 
+    // 上次点「清理缓存」时界面正占着的那些文件，现在 WebView2 还没起来、文件是自由的。
+    // 必须早于 `run()`：Tauri 一进 setup 窗口就已经建好，缓存立刻又被锁住。
+    let _ = xcl_service::webview_cache::purge_on_boot();
+
     xcl_desktop::run()
 }

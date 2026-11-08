@@ -7,6 +7,7 @@ import LayersOutlined from "@mui/icons-material/LayersOutlined";
 import LocalOfferOutlined from "@mui/icons-material/LocalOfferOutlined";
 import ViewInArOutlined from "@mui/icons-material/ViewInArOutlined";
 import { useUpdateActions, useUpdateState } from "../../lib/updateContext";
+import ChangelogDialog from "../ChangelogDialog";
 
 type AppInfo = {
   name: string;
@@ -94,6 +95,7 @@ const H2_SX = {
 
 export default function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null);
+  const [logOpen, setLogOpen] = useState(false);
   const { view } = useUpdateState();
   const { check } = useUpdateActions();
   const checking = view?.phase === "checking";
@@ -210,6 +212,14 @@ export default function AboutSection() {
               sx={{ height: 20, minHeight: 20, py: 0, px: 1, fontSize: 10.5 }}
             >
               检查更新
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => setLogOpen(true)}
+              sx={{ height: 20, minHeight: 20, py: 0, px: 1, fontSize: 10.5 }}
+            >
+              更新日志
             </Button>
           </Stack>
         )}
@@ -352,6 +362,8 @@ export default function AboutSection() {
           {info?.name ?? "Xin Craft Launcher"}
         </Typography>
       </Box>
+
+      <ChangelogDialog open={logOpen} onClose={() => setLogOpen(false)} />
     </Box>
   );
 }

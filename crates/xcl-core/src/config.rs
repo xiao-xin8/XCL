@@ -26,6 +26,8 @@ pub const RELAY_ENDPOINT: &str = baked::RELAY;
 pub const CONNECT_MANIFEST_ENDPOINT: &str = baked::CONNECT_MANIFEST;
 pub const ACCOUNT_SERVER_ENDPOINT: &str = baked::ACCOUNT_SERVER;
 pub const UPDATE_MANIFEST_ENDPOINT: &str = baked::UPDATE_MANIFEST;
+/// 微软登录用的 Azure 应用 client id。空串 = 这个构建没有微软登录。
+pub const MSA_CLIENT_ID: &str = baked::MSA_CLIENT_ID;
 
 /// 当前配置结构版本。将来做迁移时靠它判断。
 pub const CURRENT_SCHEMA: u32 = 1;

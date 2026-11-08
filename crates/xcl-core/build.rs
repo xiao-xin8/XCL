@@ -33,11 +33,13 @@ fn main() {
          pub const RELAY: &str = {relay:?};\n\
          pub const CONNECT_MANIFEST: &str = {connect:?};\n\
          pub const ACCOUNT_SERVER: &str = {account:?};\n\
-         pub const UPDATE_MANIFEST: &str = {update:?};\n",
+         pub const UPDATE_MANIFEST: &str = {update:?};\n\
+         pub const MSA_CLIENT_ID: &str = {msa:?};\n",
         relay = pick(doc.as_ref(), "connect", "relay"),
         connect = pick(doc.as_ref(), "connect", "manifestUrl"),
         account = pick(doc.as_ref(), "connect", "accountServer"),
         update = pick(doc.as_ref(), "update", "manifestUrl"),
+        msa = pick(doc.as_ref(), "msa", "clientId"),
     );
 
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("baked.rs");

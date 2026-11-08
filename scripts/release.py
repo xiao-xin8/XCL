@@ -14,7 +14,8 @@
 4. 把 exe 复制成 `<cloud>/XCL-<版本>.exe`；
 5. 用 `<cloud>/release-notes.json`（人工维护）补上标题、更新内容、是否强制；
 6. 写出 `<cloud>/update.json`；
-7. 给清单签名，生成 `update.json.sig`。默认调 `cargo run --example sign`；
+7. 把这版追加进 `<cloud>/changelog.json`（同版本覆盖，版本倒序）；
+8. 给清单签名，生成 `update.json.sig`。默认调 `cargo run --example sign`；
    已经编译过 sign 时用 `--sign-bin` 直接跑它，不触发构建。
 
 为什么要有这个脚本：手抄哈希进 JSON，十次里必错一次，而错了的表现是
@@ -41,8 +42,10 @@ REPO = SCRIPT.parent.parent
 PROJECT = REPO.parent
 CLOUD = PROJECT / "cloud"
 NOTES = CLOUD / "release-notes.json"
+CHANGELOG = CLOUD / "changelog.json"
 
 SCHEMA = 2
+CHANGELOG_SCHEMA = 1
 
 
 def read_version() -> str:
@@ -111,6 +114,57 @@ def digest(path: Path) -> tuple[str, int]:
             hasher.update(chunk)
             size += len(chunk)
     return hasher.hexdigest(), size
+
+
+def version_key(version: str) -> tuple[int, int, int]:
+    """按主次修订号排序；解析不了的按 0 处理，只用于稳定展示顺序。"""
+    core = version.strip().lstrip("v").split("-")[0]
+    parts: list[int] = []
+    for piece in core.split(".")[:3]:
+        try:
+            parts.append(int(piece))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)  # type: ignore[return-value]
+
+
+def write_changelog(manifest: dict) -> None:
+    """把这一版并进更新日志。
+
+    更新日志是**只增**的历史：同一版本重跑发布脚本时覆盖那一条，而不是再插一条。
+    `update.json` 只保留最新版，页面和启动器要翻历史时都读这个文件。
+    """
+    entry = {
+        "version": manifest["version"],
+        "channel": manifest.get("channel", "stable"),
+        "publishedAt": manifest.get("publishedAt", ""),
+        "title": manifest.get("title", ""),
+        "notes": manifest.get("notes", ""),
+        "changelog": manifest.get("changelog", []),
+        "force": bool(manifest.get("force", False)),
+    }
+
+    if CHANGELOG.is_file():
+        document = json.loads(CHANGELOG.read_text(encoding="utf-8"))
+    else:
+        document = {"schema": CHANGELOG_SCHEMA, "releases": []}
+
+    releases = [
+        item
+        for item in document.get("releases", [])
+        if item.get("version") != entry["version"]
+    ]
+    releases.append(entry)
+    releases.sort(key=lambda item: version_key(item.get("version", "")), reverse=True)
+
+    document = {"schema": CHANGELOG_SCHEMA, "releases": releases}
+
+    CHANGELOG.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"已更新    {CHANGELOG}（共 {len(releases)} 个版本）")
 
 
 def build_archive(exe: Path, out: Path) -> None:
@@ -257,6 +311,8 @@ def main() -> int:
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     print(f"已写出    {manifest_path}")
+
+    write_changelog(manifest)
 
     # 签名走 Rust 示例：私钥在 %USERPROFILE%\.xcl\ 下，python 这边没有 ed25519。
     # 机器上已有编译好的 sign 时可以直接指定，避免为了签一次名再起一轮构建。

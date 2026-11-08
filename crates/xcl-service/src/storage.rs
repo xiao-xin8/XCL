@@ -23,6 +23,8 @@ pub enum CacheKind {
     Temp,
     /// 皮肤地址索引与位图
     Skin,
+    /// 界面内核（WebView2）的浏览器缓存，不在 `cache_root` 下
+    WebView,
     /// 以上全部
     All,
 }
@@ -35,6 +37,16 @@ pub struct CacheEntry {
     pub label: &'static str,
     pub desc: &'static str,
     pub bytes: u64,
+}
+
+/// 一次清理的结果。
+///
+/// `pending` 为真表示界面内核的缓存只登记了清理请求，前端要重启应用才能真正删掉。
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearResult {
+    pub freed: u64,
+    pub pending: bool,
 }
 
 /// 目录总大小。读不了的项直接跳过 —— 统计不准好过弹错。
@@ -63,6 +75,8 @@ impl AppState {
             CacheKind::Http => vec![layout.http_cache_dir()],
             CacheKind::Temp => vec![layout.temp_dir()],
             CacheKind::Skin => vec![layout.skin_cache_dir()],
+            // WebView 缓存不在 cache_root 下，由 cache_clear 单独处理
+            CacheKind::WebView => vec![],
             CacheKind::All => vec![
                 layout.http_cache_dir(),
                 layout.temp_dir(),
@@ -93,11 +107,27 @@ impl AppState {
                 desc: "地址索引与位图",
                 bytes: dir_size(&layout.skin_cache_dir()),
             },
+            CacheEntry {
+                kind: "webView",
+                label: "浏览器内核",
+                desc: "界面渲染缓存（清理后自动重启）",
+                bytes: crate::webview_cache::size(),
+            },
         ]
     }
 
     /// 清掉指定缓存。目录不存在算成功（结果一样）。
-    pub fn cache_clear(&self, kind: CacheKind) -> Result<(), AppError> {
+    pub fn cache_clear(&self, kind: CacheKind) -> Result<ClearResult, AppError> {
+        let mut result = ClearResult::default();
+
+        // 界面内核的缓存落在 %LOCALAPPDATA%\<identifier>\EBWebView，
+        // 不在 cache_root 里，所以不走下面那条 starts_with 的兜底校验。
+        if matches!(kind, CacheKind::WebView | CacheKind::All) {
+            let outcome = crate::webview_cache::schedule_clean();
+            result.freed += outcome.freed;
+            result.pending |= outcome.pending;
+        }
+
         let paths = self
             .cache_path(kind)
             .ok_or_else(|| AppError::validation("缓存类别不正确", String::new()))?;
@@ -111,14 +141,16 @@ impl AppState {
             if !path.starts_with(self.layout.cache_root()) {
                 continue;
             }
+            let freed = dir_size(&path);
             fs::remove_dir_all(&path).map_err(|e| AppError::io(&e, "清理缓存"))?;
+            result.freed += freed;
         }
 
         // 接口缓存是内存里的那份，也要一起失效，否则「清了还在」
         if matches!(kind, CacheKind::Http | CacheKind::All) {
             self.cache().clear();
         }
-        Ok(())
+        Ok(result)
     }
 }
 

@@ -1,9 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Avatar,
   Box,
   Button,
-  Checkbox,
   Chip,
   List,
   ListItem,
@@ -11,7 +10,6 @@ import {
   ListItemText,
   Paper,
   Stack,
-  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
@@ -19,36 +17,37 @@ import {
   alpha,
 } from "@mui/material";
 import { invoke } from "@tauri-apps/api/core";
+import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import type {
   AccountView,
   AppError,
-  AuthlibLoginOutcome,
-  AuthlibProfile,
   SkinModel,
   SkinRender,
 } from "../lib/types";
-import { toAppError } from "../lib/types";
+import { ACCOUNT_KIND_LABEL, toAppError } from "../lib/types";
+import { formatDateTime } from "../lib/format";
 import { playEnter } from "../motion/pageMotion";
+import PageTransition from "../motion/PageTransition";
 import { PANEL_SURFACE_SX } from "../lib/surfaces";
+import AccountAddDialog from "./AccountAddDialog";
 import ErrorState from "./ErrorState";
-import Loading from "./Loading";
+import { PreviewBox, SkinPlaceholder } from "./SkinPreview";
 
-// 和 LoginSidebar 一样：skinview3d 拖着一整个 three.js，只能按需拉。
-// 这里是静态 import 的话，three 会跟着启动页一起进首屏 chunk —— 哪怕
-// 从头到尾没点进过「管理账号」。
-const SkinViewer3D = lazy(() => import("./SkinViewer3D"));
+/** 详情卡用的登录方式全称（列表 Chip 用 ACCOUNT_KIND_LABEL 的短标签）。 */
+function kindLongLabel(kind: AccountView["kind"]): string {
+  if (kind === "microsoft") return "微软正版";
+  return kind === "offline" ? "离线登录" : "第三方登录";
+}
 
 /**
  * 账号管理（整页子页，从启动页「管理账号」进入，标题栏给返回键）。
  *
- * 左栏是账号列表（点选），右栏是选中账号的 3D 皮肤预览 + 操作
- * （切换 / 刷新 / 删除）+ 添加表单。两类登录（微软登录不在范围内，
- * 需要正版账号才能验证）：
- * - 离线：只要一个名字，UUID 由名字派生，不联网；
- * - 第三方：Yggdrasil 协议（LittleSkin 等），服务器地址 + 邮箱 + 密码。
+ * 左栏是账号列表（点选）+「添加账号」按钮；右栏**全是选中账号的角色
+ * 详细信息**（预览 / 信息 / 操作），添加账号一律走弹窗（`AccountAddDialog`，
+ * 三种登录方式一窗三档：微软正版 / 离线 / 第三方）。
  *
  * 表单校验与错误文案全部来自后端，前端只收集输入、渲染结果。
  *
@@ -70,6 +69,8 @@ export default function AccountPage(props: {
   const [loaded, setLoaded] = useState(false);
   /** 左栏选中的账号（右栏预览谁） */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** 添加账号弹窗 */
+  const [addOpen, setAddOpen] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -156,13 +157,24 @@ export default function AccountPage(props: {
           </List>
           {loaded && accounts.length === 0 && (
             <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
-              还没有账号，在右边添加一个。
+              还没有账号，点下面的按钮添加一个。
             </Typography>
           )}
         </Box>
+        <Button
+          fullWidth
+          variant="outlined"
+          startIcon={<AddIcon sx={{ fontSize: 17 }} />}
+          onClick={() => setAddOpen(true)}
+          sx={{ mt: 1.25, flexShrink: 0 }}
+        >
+          添加账号
+        </Button>
       </Box>
 
-      {/* 右栏：预览 + 操作 + 添加表单 */}
+      {/* 右栏：选中账号的角色详细信息（添加账号走弹窗，不占这栏）。
+          换账号的切换动画交给内层 `PageTransition`（同联机页「入口↔房间」）：
+          旧卡退场 → 换人 → 新卡落下，皮肤预览随新卡重新淡入。 */}
       <Box
         sx={{
           flex: 1,
@@ -175,41 +187,52 @@ export default function AccountPage(props: {
         {loadError && (
           <ErrorState variant="banner" error={loadError} sx={{ mb: 2 }} />
         )}
-        {/* 读完才挂载：数据通常比页面切换的 110ms 还快，先渲染一遍会和
-            数据到达后的那次 `playEnter` 各动一次（同一批表单闪两下） */}
         {loaded && (
-          <Box
-            sx={{
-              flex: 1,
-              minHeight: 0,
-              overflow: "auto",
-              scrollbarGutter: "stable",
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              // 列方向的卡片默认会被压扁到容器高度，内容就截断了
-              "& > *": { flexShrink: 0 },
+          <PageTransition
+            pageKey={selected?.id ?? "none"}
+            initial={false}
+            render={(key) => {
+              // 退场期间按旧 key 渲染旧账号；删掉的账号兜底成占位文案
+              const shown = accounts.find((a) => a.id === key) ?? null;
+              return (
+                // 滚动容器：不标记、不参与动画，只负责滚（同联机页）
+                <Box
+                  sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: "auto",
+                    scrollbarGutter: "stable",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    "& > *": { flexShrink: 0 },
+                  }}
+                >
+                  {shown ? (
+                    <AccountDetail account={shown} onChanged={reload} />
+                  ) : (
+                    <Paper
+                      variant="outlined"
+                      sx={{ p: 3, borderRadius: 1, textAlign: "center", color: "text.secondary", fontSize: 13 }}
+                    >
+                      在左边选一个账号查看详细信息。
+                    </Paper>
+                  )}
+                </Box>
+              );
             }}
-          >
-            {/* 三张卡：角色信息 / 添加离线账号 / 添加第三方账号。
-                都是 Paper，`playEnter` 会自动把每张各算一块，逐块落下 */}
-            {selected ? (
-              <AccountDetail account={selected} onChanged={reload} />
-            ) : (
-              <Paper
-                variant="outlined"
-                sx={{ p: 3, borderRadius: 1, textAlign: "center", color: "text.secondary", fontSize: 13 }}
-              >
-                在左边选一个账号，或直接在下面添加。
-              </Paper>
-            )}
-
-            <OfflineForm onDone={reload} />
-
-            <AuthlibForm onDone={reload} />
-          </Box>
+          />
         )}
       </Box>
+
+      <AccountAddDialog
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        onDone={async () => {
+          await reload();
+          setAddOpen(false);
+        }}
+      />
     </Box>
   );
 }
@@ -264,7 +287,7 @@ function AccountRow(props: {
               </Typography>
               <Chip
                 size="small"
-                label={account.kind === "offline" ? "离线" : "第三方"}
+                label={ACCOUNT_KIND_LABEL[account.kind]}
                 sx={{ fontSize: 10, height: 18 }}
               />
               {account.active && (
@@ -368,36 +391,24 @@ function AccountDetail(props: {
   };
 
   return (
-    <Paper
-      variant="outlined"
-      sx={{ p: 2.5, borderRadius: 1, display: "flex", gap: 2.5, alignItems: "flex-start" }}
-    >
-      {/* 3D 皮肤预览 */}
+    <>
+      <Paper
+        variant="outlined"
+        sx={{ p: 2.5, borderRadius: 1, display: "flex", gap: 2.5, alignItems: "flex-start" }}
+      >
+      {/* 3D 皮肤预览：皮肤没到显示方块脸占位，到了进预览盒。
+          两件套与登录侧栏同一份组件（`SkinPreview`）；viewer 带 key，
+          每个账号重新淡入一次（SKIN_FADE）。 */}
       <Box
         sx={{
           width: 220,
           height: 240,
           flexShrink: 0,
-          borderRadius: 2,
-          overflow: "hidden",
-          bgcolor: (t) => alpha(t.palette.primary.main, 0.14),
+          display: "flex",
+          flexDirection: "column",
         }}
       >
-        {skin ? (
-          <Suspense
-            fallback={
-              <Box sx={{ height: "100%", display: "grid", placeItems: "center" }}>
-                <Loading />
-              </Box>
-            }
-          >
-            <SkinViewer3D skin={skin.skin} cape={skin.cape} model={skin.model} height={240} />
-          </Suspense>
-        ) : (
-          <Box sx={{ height: "100%", display: "grid", placeItems: "center" }}>
-            <Loading />
-          </Box>
-        )}
+        {skin ? <PreviewBox account={account} skin={skin} /> : <SkinPlaceholder />}
       </Box>
 
       {/* 信息 + 操作 */}
@@ -408,7 +419,7 @@ function AccountDetail(props: {
           </Typography>
           <Chip
             size="small"
-            label={account.kind === "offline" ? "离线登录" : "第三方登录"}
+            label={kindLongLabel(account.kind)}
             sx={{ fontSize: 10.5, height: 20 }}
           />
           {account.active && (
@@ -437,6 +448,11 @@ function AccountDetail(props: {
                 {!account.hasPassword && "（未保存密码，不能刷新）"}
               </Typography>
             </>
+          )}
+          {account.kind === "microsoft" && (
+            <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
+              登录凭据会自动续期，不用重复登录。
+            </Typography>
           )}
         </Stack>
 
@@ -492,14 +508,20 @@ function AccountDetail(props: {
               切换到这个账号
             </Button>
           )}
-          {account.kind === "authlib" && (
-            <Tooltip title={account.hasPassword ? "刷新登录凭据" : "登录时没存密码，不能刷新"}>
+          {(account.kind === "authlib" || account.kind === "microsoft") && (
+            <Tooltip
+              title={
+                account.kind === "authlib" && !account.hasPassword
+                  ? "登录时没存密码，不能刷新"
+                  : "刷新登录凭据"
+              }
+            >
               <span>
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={<RefreshIcon sx={{ fontSize: 16 }} />}
-                  disabled={busy || !account.hasPassword}
+                  disabled={busy || (account.kind === "authlib" && !account.hasPassword)}
                   onClick={() =>
                     void run(async () => {
                       await invoke("account_refresh", { id: account.id });
@@ -540,189 +562,120 @@ function AccountDetail(props: {
           </Tooltip>
         </Stack>
       </Box>
-    </Paper>
-  );
-}
-
-function OfflineForm(props: { onDone: () => void | Promise<void> }) {
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<AppError | null>(null);
-
-  const submit = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await invoke("account_add_offline", { name: name.trim() });
-      setName("");
-      await props.onDone();
-    } catch (e: unknown) {
-      setError(toAppError(e, "添加失败"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Paper
-      component="form"
-      variant="outlined"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-      sx={{ p: 2.5, borderRadius: 1 }}
-    >
-      <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: "text.secondary", mb: 1 }}>
-        添加离线账号
-      </Typography>
-      <Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
-        <TextField
-          size="small"
-          label="玩家名"
-          placeholder="Steve"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          error={!!error}
-          helperText={error ? `${error.title}：${error.message}` : "3–16 位字母、数字或下划线，不用密码"}
-          sx={{ flex: 1, maxWidth: 320 }}
-        />
-        <Button
-          type="submit"
-          variant="contained"
-          disabled={busy || name.trim().length === 0}
-          sx={{ mt: 0.25 }}
-        >
-          {busy ? "添加中…" : "添加"}
-        </Button>
-      </Stack>
-    </Paper>
-  );
-}
-
-function AuthlibForm(props: { onDone: () => void | Promise<void> }) {
-  const [server, setServer] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [remember, setRemember] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<AppError | null>(null);
-  /** 多角色时要选一个 */
-  const [pending, setPending] = useState<{
-    profiles: AuthlibProfile[];
-    serverUrl: string;
-  } | null>(null);
-
-  const submit = async (profileId?: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const outcome = await invoke<AuthlibLoginOutcome>("account_add_authlib", {
-        serverUrl: server.trim(),
-        email: email.trim(),
-        password,
-        profileId: profileId ?? null,
-        rememberPassword: remember,
-      });
-      if (outcome.outcome === "needProfile") {
-        setPending({ profiles: outcome.profiles, serverUrl: outcome.serverUrl });
-      } else {
-        setPassword("");
-        setPending(null);
-        await props.onDone();
-      }
-    } catch (e: unknown) {
-      setError(toAppError(e, "登录失败"));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (pending) {
-    return (
-      <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 1 }}>
-        <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: "text.secondary", mb: 1 }}>
-          选择角色（{pending.serverUrl}）
-        </Typography>
-        <Stack spacing={1} sx={{ maxWidth: 320 }}>
-          {pending.profiles.map((profile) => (
-            <Button
-              key={profile.id}
-              variant="outlined"
-              disabled={busy}
-              onClick={() => void submit(profile.id)}
-              sx={{ justifyContent: "flex-start", textTransform: "none" }}
-            >
-              {profile.name}
-            </Button>
-          ))}
-        </Stack>
-        <Button size="small" sx={{ mt: 1 }} onClick={() => setPending(null)}>
-          返回
-        </Button>
       </Paper>
-    );
-  }
 
+      <AccountExtraInfo account={account} skin={skin} />
+    </>
+  );
+}
+
+/**
+ * 底下的「详细信息」卡：把角色的细项摊开摆一摆，右栏不会空荡荡。
+ * 离线 / 第三方信息少些；微软账号以后的皮肤管理也挂这一片。
+ *
+ * ⚠️ 所有信息行**始终渲染**（皮肤还没到就先显示预期值）：条件渲染会让
+ * 卡片在皮肤加载完再长高一截，切换账号的落下动画播完又「重载」一下。
+ */
+function AccountExtraInfo(props: { account: AccountView; skin: SkinRender | null }) {
+  const { account, skin } = props;
+  // 皮肤来源的预期值：离线必然是内置；其余先按类型显示，皮肤到了再按实际修正
+  const skinSource = skin
+    ? skin.source === "server"
+      ? account.kind === "microsoft"
+        ? "Minecraft 官方"
+        : "认证服务器"
+      : "内置默认皮肤"
+    : account.kind === "offline"
+      ? "内置默认皮肤"
+      : account.kind === "microsoft"
+        ? "Minecraft 官方"
+        : "认证服务器";
   return (
-    <Paper
-      component="form"
-      variant="outlined"
-      onSubmit={(e) => {
-        e.preventDefault();
-        void submit();
-      }}
-      sx={{ p: 2.5, borderRadius: 1 }}
-    >
+    <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 1 }}>
       <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: "text.secondary", mb: 1 }}>
-        添加第三方账号
+        详细信息
       </Typography>
-      <Stack spacing={1.25} sx={{ maxWidth: 420 }}>
-        <TextField
-          size="small"
-          label="认证服务器"
-          placeholder="https://littleskin.cn/api/yggdrasil"
-          value={server}
-          onChange={(e) => setServer(e.target.value)}
-          error={!!error}
+      <Stack sx={{ "& > *": { py: 0.35 } }}>
+        <InfoRow label="UUID" value={account.uuid} mono />
+        <InfoRow
+          label="登录方式"
+          value={kindLongLabel(account.kind)}
         />
-        <TextField
-          size="small"
-          label="邮箱"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          error={!!error}
+        <InfoRow
+          label="添加时间"
+          value={formatDateTime(new Date(account.createdAtMs).toISOString())}
         />
-        <TextField
-          size="small"
-          label="密码"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          error={!!error}
-          helperText={error ? `${error.title}：${error.message}` : undefined}
-        />
-        <Box sx={{ display: "flex", alignItems: "center" }}>
-          <Checkbox
-            size="small"
-            checked={remember}
-            onChange={(e) => setRemember(e.target.checked)}
-            sx={{ p: 0.5, ml: -0.5 }}
+        {account.kind === "authlib" && (
+          <>
+            <InfoRow label="认证服务器" value={account.serverUrl ?? "—"} mono />
+            <InfoRow label="登录邮箱" value={account.email ?? "—"} />
+            <InfoRow
+              label="密码"
+              value={account.hasPassword ? "已保存（可自动刷新）" : "未保存（刷新需重新登录）"}
+            />
+          </>
+        )}
+        {account.kind === "offline" && (
+          <InfoRow
+            label="皮肤模型"
+            value={account.skinModel === "slim" ? "Alex（细手臂）" : account.skinModel === "default" ? "Steve（粗手臂）" : "按 UUID 自动"}
           />
-          <Typography sx={{ fontSize: 12, color: "text.secondary" }}>
-            记住密码（之后可以一键刷新登录，不用重新输）
+        )}
+        <InfoRow label="皮肤来源" value={skinSource} />
+      </Stack>
+
+      {account.kind === "microsoft" && (
+        <Box sx={{ mt: 1.5, pt: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
+          <Typography sx={{ fontSize: 11.5, fontWeight: 600, color: "text.secondary", mb: 0.5 }}>
+            皮肤与披风
+          </Typography>
+          <Typography sx={{ fontSize: 12, color: "text.secondary", lineHeight: 1.7 }}>
+            皮肤和披风来自 Minecraft 官方。去官网换皮肤、换披风，这里会自动跟着变。
+            在启动器里直接管理皮肤的功能在做了，先在这里留个位置。
           </Typography>
         </Box>
-        <Box>
-          <Button
-            type="submit"
-            variant="contained"
-            disabled={busy || !server.trim() || !email.trim() || !password}
-          >
-            {busy ? "登录中…" : "登录"}
-          </Button>
+      )}
+      {account.kind === "offline" && (
+        <Box sx={{ mt: 1.5, pt: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
+          <Typography sx={{ fontSize: 12, color: "text.secondary", lineHeight: 1.7 }}>
+            离线皮肤靠启动参数里的 UUID 区分模型；切换 Steve / Alex 后进入游戏的
+            UUID 会变，单人存档里的玩家数据可能对不上。
+          </Typography>
         </Box>
-      </Stack>
+      )}
+      {account.kind === "authlib" && (
+        <Box sx={{ mt: 1.5, pt: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
+          <Typography sx={{ fontSize: 12, color: "text.secondary", lineHeight: 1.7 }}>
+            皮肤和模型由认证服务器决定，去服务器的用户中心更换。
+          </Typography>
+        </Box>
+      )}
     </Paper>
   );
 }
+
+/** 详细信息卡里的一行「标签：值」。 */
+function InfoRow(props: { label: string; value: string; mono?: boolean }) {
+  const { label, value, mono } = props;
+  return (
+    <Box sx={{ display: "flex", gap: 1.5 }}>
+      <Typography
+        sx={{ fontSize: 12, color: "text.secondary", width: 88, flexShrink: 0, lineHeight: 1.7 }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        sx={{
+          fontSize: 12,
+          lineHeight: 1.7,
+          wordBreak: "break-all",
+          fontFamily: mono ? "ui-monospace, monospace" : undefined,
+        }}
+      >
+        {value}
+      </Typography>
+    </Box>
+  );
+}
+
+

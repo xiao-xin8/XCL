@@ -492,9 +492,9 @@ impl AppState {
         //    快照在最开头就取好了，准备过程中改设置不会影响本次启动。
         // 账号决定 --uuid / --accessToken / --userType；第三方账号还会带来
         // 一串 -javaagent JVM 参数（authlib-injector）
-        // 登录：第三方账号每次启动都先确认凭据还有效，
-        // 但能刷新就不重登），离线账号这一步不联网、直接过。
-        self.ensure_authlib_session().await?;
+        // 登录：第三方 / 微软账号每次启动都先确认凭据还有效
+        // （能静默续期就不打扰人），离线账号这一步不联网、直接过。
+        self.ensure_account_session().await?;
         let player = self.player_profile(version_id)?;
         let mut extra_jvm = self.authlib_jvm_args().await?;
         extra_jvm.extend(split_user_args(&launch_values.jvm_args));

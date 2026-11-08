@@ -541,13 +541,20 @@ export function isJavaTask(versionId: string): boolean {
 
 // ---------- 账号（对应 xcl-service::auth） ----------
 
-/** 登录方式。微软登录不在支持范围内（需要正版账号才能验证链路） */
-export type AccountKind = "offline" | "authlib";
+/** 登录方式。微软正版走设备代码流（见 `account_msa_*` 命令）。 */
+export type AccountKind = "offline" | "authlib" | "microsoft";
+
+/** 登录方式的短标签（列表 Chip / 详情用）。 */
+export const ACCOUNT_KIND_LABEL: Record<AccountKind, string> = {
+  offline: "离线",
+  authlib: "第三方",
+  microsoft: "微软",
+};
 
 export type AccountView = {
   id: string;
   kind: AccountKind;
-  /** 离线 = 玩家名；第三方 = 角色名 */
+  /** 离线 = 玩家名；第三方 / 微软 = 角色名 */
   username: string;
   uuid: string;
   /** 第三方登录的认证服务器地址 */
@@ -558,6 +565,8 @@ export type AccountView = {
   hasPassword: boolean;
   /** 是否是当前账号 */
   active: boolean;
+  /** 添加时间（Unix 毫秒） */
+  createdAtMs: number;
   /** 离线账号手动选的皮肤模型；null / 缺省 = 按 UUID 自动 */
   skinModel?: SkinModel | null;
 };
@@ -593,6 +602,22 @@ export type AuthlibLoginOutcome =
       profiles: AuthlibProfile[];
       serverUrl: string;
     };
+
+// ---------- 微软登录（设备代码流，对应 xcl-service::auth） ----------
+
+/** `account_msa_begin`：给玩家看的验证码与登录地址。 */
+export type MsaLoginStart = {
+  /** 玩家要在网页里输入的短码 */
+  userCode: string;
+  /** 输码的网址 */
+  verificationUri: string;
+  /** 服务端给的整句指引（已本地化） */
+  message: string;
+  expiresInSeconds: number;
+};
+
+/** `account_msa_poll`：waiting = 还在等输码；done = 账号已入库。 */
+export type MsaPollView = { status: "waiting" } | ({ status: "done" } & AccountView);
 
 // ---------- 错误（对应 xcl-core::AppError） ----------
 
@@ -742,7 +767,7 @@ export type AppConfig = {
 /** 发布频道 */
 export type UpdateChannel = "stable" | "preview";
 
-/** 自更新配置（`[update]`） */
+/** 自更新（`[update]`） */
 export type UpdateConfig = {
   channel: UpdateChannel;
   /** 启动后自动检查 */
@@ -757,6 +782,18 @@ export type UpdateConfig = {
   forceTitle: string;
   forceNotes: string;
   forceChangelog: string[];
+};
+
+/** 更新日志里的一条历史版本（对应 `xcl_update::ChangelogRelease`） */
+export type ChangelogRelease = {
+  version: string;
+  channel: UpdateChannel;
+  publishedAt: string | null;
+  title: string;
+  notes: string;
+  changelog: string[];
+  /** 当时是否是强制更新 */
+  force: boolean;
 };
 
 // ---------- 自更新（对应 xcl_service::update） ----------

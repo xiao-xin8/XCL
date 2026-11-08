@@ -4,9 +4,11 @@
 //! accessToken，语义上是「账号数据」而不是「偏好设置」。同样用
 //! 「临时文件 + rename」防写一半。
 //!
-//! 登录方式分两类（微软登录不在范围内，见 `xcl-auth` 文档）：
+//! 登录方式分三类：
 //! - 离线：只有名字，UUID 由名字派生
 //! - 第三方：Yggdrasil 协议，连自己填的认证服务器
+//! - 微软正版：设备代码流（`msa_begin` / `msa_poll`）→ Xbox → 游戏令牌，
+//!   平时靠 refresh token 静默续期
 
 use std::fs;
 use std::path::PathBuf;
@@ -16,12 +18,20 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
+use xcl_auth::msa::{DevicePoll, MsaClient, MsaTokens, RefreshedSession};
 use xcl_auth::yggdrasil::{AuthlibLoginResult, AuthlibProfile, AuthlibSession, YggdrasilClient};
-use xcl_auth::{Account, AccountKind, AccountStore, SkinModel};
-use xcl_core::{AppError, PathLayout};
+use xcl_auth::{Account, AccountKind, AccountStore, MsaCredentials, SkinModel};
+use xcl_core::{AppError, ErrorCode, PathLayout};
 use xcl_net::RaceWinner;
 
 use crate::AppState;
+
+/// MC 令牌过期时间提前 1 小时记账（PCL `ModLaunch.vb:1045` 同款）：
+/// 到点就主动续期，续期失败的 1 小时宽限里旧令牌其实还能用。
+const MSA_EXPIRY_MARGIN_SECS: i64 = 3600;
+/// 设备码轮询连续传输失败的容忍次数（PCL `MyMsgLogin.xaml.vb:148` 同款：
+/// 玩家正在浏览器里输码，一次网络抖动不该把登录搞死）。
+const MSA_POLL_MAX_FAILURES: u32 = 3;
 
 /// authlib-injector 官方 artifact 清单：版本 / 下载地址 / SHA-256。
 /// 与主流启动器用的是同一个入口。
@@ -152,6 +162,124 @@ fn view(account: &Account, active_id: Option<&str>) -> AccountView {
         active: Some(account.id.as_str()) == active_id,
         created_at_ms: account.created_at_ms,
         skin_model: account.skin_model,
+    }
+}
+
+// ---------- 微软登录（设备代码流）----------
+
+/// `msa_begin` 给前端的验证码信息。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MsaLoginStart {
+    /// 玩家要在网页里输入的短码。
+    pub user_code: String,
+    /// 输码的网址。
+    pub verification_uri: String,
+    /// 服务端给的整句指引（已本地化），直接显示。
+    pub message: String,
+    pub expires_in_seconds: u64,
+}
+
+/// `msa_poll` 的结果。登录是「命令 + 轮询」模式：前端定时 tick，
+/// 节奏由后端状态机把关（没到点直接回 waiting，不打微软）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum MsaPollView {
+    /// 还在等玩家输码（含网络抖动被容忍的间隙）
+    Waiting,
+    /// 登录完成，账号已入库并置为当前
+    Done(AccountView),
+}
+
+/// 设备码登录的进行中状态。挂在 `AppState::msa_login`，取消或终止时清掉。
+/// 纯数据 + 节奏规则，不碰网络，可单测。
+pub struct MsaPendingLogin {
+    device_code: String,
+    /// 设备码本身的有效期（只约束「等输码」阶段；拿到微软令牌后作废）
+    deadline_ms: i64,
+    /// 最早发起下一次轮询的时刻
+    next_poll_ms: i64,
+    /// 当前轮询间隔（slow_down 后永久 +5 秒，RFC 8628）
+    interval_ms: i64,
+    /// 连续传输失败次数（超过 `MSA_POLL_MAX_FAILURES` 终止）
+    consecutive_failures: u32,
+    /// 设备码换到的微软令牌。链失败时留着它 —— 重试直接跑链，
+    /// 不再走浏览器（设备码是一次性的，丢了就得重新输码）。
+    ms_tokens: Option<MsaTokens>,
+}
+
+impl MsaPendingLogin {
+    fn new(device_code: String, expires_in_secs: u64, interval_secs: u64, now_ms: i64) -> Self {
+        let interval_ms = (interval_secs.max(1) as i64) * 1000;
+        Self {
+            device_code,
+            deadline_ms: now_ms + (expires_in_secs as i64) * 1000,
+            next_poll_ms: now_ms + interval_ms,
+            interval_ms,
+            consecutive_failures: 0,
+            ms_tokens: None,
+        }
+    }
+
+    fn poll_due(&self, now_ms: i64) -> bool {
+        now_ms >= self.next_poll_ms
+    }
+
+    fn is_expired(&self, now_ms: i64) -> bool {
+        now_ms >= self.deadline_ms
+    }
+
+    fn note_pending(&mut self, now_ms: i64) {
+        self.consecutive_failures = 0;
+        self.next_poll_ms = now_ms + self.interval_ms;
+    }
+
+    /// slow_down：间隔**永久** +5 秒（RFC 8628 §3.5，conic 同款）。
+    fn note_slow_down(&mut self, now_ms: i64) {
+        self.consecutive_failures = 0;
+        self.interval_ms += 5_000;
+        self.next_poll_ms = now_ms + self.interval_ms;
+    }
+
+    /// 传输失败。返回 `false` = 容忍额度用完，该终止了。
+    fn note_failure(&mut self, now_ms: i64) -> bool {
+        self.consecutive_failures += 1;
+        self.next_poll_ms = now_ms + self.interval_ms;
+        self.consecutive_failures <= MSA_POLL_MAX_FAILURES
+    }
+}
+
+/// MC 令牌的记账过期时间 = 签发时刻 + `expires_in` − 1 小时提前量。
+fn mc_expires_at(expires_in_secs: u64) -> i64 {
+    let effective = (expires_in_secs as i64) - MSA_EXPIRY_MARGIN_SECS;
+    xcl_auth::now_ms() + effective.max(0) * 1000
+}
+
+/// 真正的硬过期（记账过期 + 提前量）。网络失败时靠它判断
+/// 「旧令牌还剩多少命」：记账过期 ≠ 真过期。
+fn mc_hard_expires_at(creds: &MsaCredentials) -> i64 {
+    creds.mc_expires_ms + MSA_EXPIRY_MARGIN_SECS * 1000
+}
+
+/// 一次链路跑完的账号（入库前的草稿）。
+fn build_msa_account(session: &xcl_auth::msa::McSession, tokens: &MsaTokens) -> Account {
+    Account {
+        id: xcl_auth::new_id(),
+        kind: AccountKind::Microsoft,
+        username: session.name.clone(),
+        uuid: session.uuid.clone(),
+        created_at_ms: xcl_auth::now_ms(),
+        skin_model: None,
+        server_url: None,
+        email: None,
+        password: None,
+        access_token: None,
+        client_token: None,
+        msa: Some(MsaCredentials {
+            refresh_token: tokens.refresh_token.clone(),
+            mc_access_token: session.mc_access_token.clone(),
+            mc_expires_ms: mc_expires_at(session.expires_in),
+        }),
     }
 }
 
@@ -346,6 +474,238 @@ impl AppState {
         Ok(())
     }
 
+    // ---------- 微软登录（设备代码流）----------
+
+    /// 第一步：取设备码，返回给前端展示的验证码信息。
+    ///
+    /// 已有进行中的登录会被顶掉 —— 「重新点一次登录」的直觉就是重来。
+    pub async fn msa_begin(&self) -> Result<MsaLoginStart, AppError> {
+        let client = MsaClient::new(xcl_core::config::MSA_CLIENT_ID)?;
+        let code = client.start_device_code().await?;
+        let pending = MsaPendingLogin::new(
+            code.device_code.clone(),
+            code.expires_in,
+            code.interval,
+            xcl_auth::now_ms(),
+        );
+        *self.lock_msa_login() = Some(pending);
+        Ok(MsaLoginStart {
+            user_code: code.user_code,
+            verification_uri: code.verification_uri,
+            message: code.message,
+            expires_in_seconds: code.expires_in,
+        })
+    }
+
+    /// 轮询一次登录进度。前端定时调用即可，节奏由后端把关：
+    /// 没到点直接回 `Waiting`（不打微软）；到点查一次并顺好下一次时刻。
+    ///
+    /// 失败分两种：网络抖动（容忍 3 次，继续等 —— 玩家正在输码）与
+    /// 终止性错误（取消/过期/封禁……直接报错并清掉状态）。
+    pub async fn msa_poll(&self) -> Result<MsaPollView, AppError> {
+        let Some(mut pending) = self.lock_msa_login().take() else {
+            return Err(AppError::validation(
+                "没有正在进行的微软登录",
+                "先点登录获取验证码",
+            ));
+        };
+        let now = xcl_auth::now_ms();
+
+        // 已经有微软令牌（上次链失败的重试路径）：直接接着跑链，
+        // 不碰设备码接口 —— 设备码是一次性的
+        if let Some(tokens) = pending.ms_tokens.clone() {
+            return self.msa_run_chain(pending, &tokens).await;
+        }
+
+        if pending.is_expired(now) {
+            return Err(AppError::validation("验证码过期了", "登录用时太长，验证码已经失效")
+                .with_hint("重新点一次登录，拿一个新的验证码"));
+        }
+        if !pending.poll_due(now) {
+            *self.lock_msa_login() = Some(pending);
+            return Ok(MsaPollView::Waiting);
+        }
+
+        let client = MsaClient::new(xcl_core::config::MSA_CLIENT_ID)?;
+        match client.poll_device_token(&pending.device_code).await {
+            Ok(DevicePoll::Pending) => {
+                pending.note_pending(now);
+                *self.lock_msa_login() = Some(pending);
+                Ok(MsaPollView::Waiting)
+            }
+            Ok(DevicePoll::SlowDown) => {
+                pending.note_slow_down(now);
+                *self.lock_msa_login() = Some(pending);
+                Ok(MsaPollView::Waiting)
+            }
+            Ok(DevicePoll::Done(tokens)) => {
+                pending.ms_tokens = Some(tokens.clone());
+                self.msa_run_chain(pending, &tokens).await
+            }
+            Err(err) => {
+                if err.code == ErrorCode::Network && pending.note_failure(now) {
+                    warn!(error = %err, "微软登录轮询失败，继续等玩家输码");
+                    *self.lock_msa_login() = Some(pending);
+                    return Ok(MsaPollView::Waiting);
+                }
+                // 终止性错误：pending 已被 take，丢弃即终止
+                Err(err)
+            }
+        }
+    }
+
+    /// 取消进行中的微软登录（关弹窗/换账号）。
+    pub fn msa_cancel(&self) {
+        *self.lock_msa_login() = None;
+    }
+
+    /// 拿到微软令牌后跑链、入库。链失败时：网络类保留状态（含令牌），
+    /// 下次 `msa_poll` 直接重试链；终止类（没买游戏、封禁……）清状态。
+    async fn msa_run_chain(
+        &self,
+        pending: MsaPendingLogin,
+        tokens: &MsaTokens,
+    ) -> Result<MsaPollView, AppError> {
+        let client = MsaClient::new(xcl_core::config::MSA_CLIENT_ID)?;
+        match client.minecraft_chain(&tokens.access_token).await {
+            Ok(session) => {
+                let account = build_msa_account(&session, tokens);
+                let view = self.store_msa_account(account)?;
+                *self.lock_msa_login() = None;
+                Ok(MsaPollView::Done(view))
+            }
+            Err(err) => {
+                if err.code == ErrorCode::Network {
+                    *self.lock_msa_login() = Some(pending);
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// 微软账号入库。同 UUID 重新登录沿用原 id 与创建时间 ——
+    /// 列表里不出现双胞胎，前端引用也不会断。
+    fn store_msa_account(&self, mut account: Account) -> Result<AccountView, AppError> {
+        let mut store = self.lock_accounts();
+        if let Some(old) = store
+            .accounts
+            .iter()
+            .find(|a| a.kind == AccountKind::Microsoft && a.uuid == account.uuid)
+        {
+            account.id = old.id.clone();
+            account.created_at_ms = old.created_at_ms;
+        }
+        store.upsert(account.clone());
+        store.set_active(&account.id);
+        save(&self.layout, &store)?;
+        Ok(view(&account, Some(&account.id)))
+    }
+
+    /// 手动刷新微软账号（账号页的「刷新登录」）。强制续期，不看记账过期时间。
+    pub async fn refresh_microsoft_account(&self, id: &str) -> Result<AccountView, AppError> {
+        let account = {
+            let store = self.lock_accounts();
+            store.find(id).cloned()
+        }
+        .ok_or_else(|| AppError::not_found("账号不存在", "它可能已经被删掉了"))?;
+        if !account.is_microsoft() {
+            return Err(AppError::unsupported(
+                "这个账号不需要这样刷新",
+                "只有微软账号走这套续期",
+            ));
+        }
+        self.renew_msa(&account, true).await
+    }
+
+    /// 按账号类型分派的刷新入口（`account_refresh` 命令用）。
+    pub async fn refresh_account(&self, id: &str) -> Result<AccountView, AppError> {
+        let kind = {
+            let store = self.lock_accounts();
+            store.find(id).map(|a| a.kind)
+        };
+        match kind {
+            None => Err(AppError::not_found("账号不存在", "它可能已经被删掉了")),
+            Some(AccountKind::Authlib) => self.refresh_authlib_account(id).await,
+            Some(AccountKind::Microsoft) => self.refresh_microsoft_account(id).await,
+            Some(AccountKind::Offline) => Err(AppError::unsupported(
+                "离线账号不需要刷新",
+                "离线登录不依赖任何服务器，随时可用",
+            )),
+        }
+    }
+
+    /// 续期一个微软账号。`force = true` 时不看记账过期时间（手动刷新）。
+    ///
+    /// 顺序是硬性的（`xcl_auth::msa::refresh_full` 的契约）：轮换后的
+    /// refresh token **先落盘**，再跑 Xbox 链 —— 微软的 refresh token
+    /// 用一次旧的就作废，链中途失败也不能把新的丢掉（丢了 = 用户被踢下线）。
+    async fn renew_msa(&self, account: &Account, force: bool) -> Result<AccountView, AppError> {
+        // 并发保护：启动前自动续期与手动「刷新登录」可能撞车
+        let _guard = self.msa_refresh_lock.lock().await;
+
+        // 拿到锁再读一次 —— 可能刚被另一边刷完
+        let fresh = {
+            let store = self.lock_accounts();
+            store.find(&account.id).cloned()
+        }
+        .ok_or_else(|| AppError::not_found("账号不存在", "它可能已经被删掉了"))?;
+        let Some(creds) = fresh.msa.clone() else {
+            return Err(AppError::validation(
+                "这个账号还没有登录凭据",
+                format!("{} 的登录状态已失效", fresh.username),
+            )
+            .with_hint("删掉它重新登录一次"));
+        };
+        if !force && xcl_auth::now_ms() < creds.mc_expires_ms {
+            // 快路径：还没到提前量（PCL「无需登录」同语义）
+            return Ok(view(&fresh, self.lock_accounts().active_id.as_deref()));
+        }
+
+        let client = MsaClient::new(xcl_core::config::MSA_CLIENT_ID)?;
+        let id = fresh.id.clone();
+        let out = client
+            .refresh_full(&creds.refresh_token, |rotated| {
+                self.save_msa_refresh_token(&id, rotated)
+            })
+            .await?;
+        self.save_msa_session(&id, &out)
+    }
+
+    /// 轮换后的 refresh token 立刻落盘（续期链路里最先做的一件事）。
+    fn save_msa_refresh_token(&self, id: &str, rotated: &str) -> Result<(), AppError> {
+        let mut store = self.lock_accounts();
+        let Some(mut account) = store.find(id).cloned() else {
+            return Err(AppError::not_found("账号不存在", "它可能已经被删掉了"));
+        };
+        if let Some(creds) = account.msa.as_mut() {
+            creds.refresh_token = rotated.to_string();
+        }
+        store.upsert(account);
+        save(&self.layout, &store)
+    }
+
+    /// 链跑完后把新游戏令牌写回账号文件。
+    fn save_msa_session(
+        &self,
+        id: &str,
+        out: &RefreshedSession,
+    ) -> Result<AccountView, AppError> {
+        let mut store = self.lock_accounts();
+        let Some(mut account) = store.find(id).cloned() else {
+            return Err(AppError::not_found("账号不存在", "它可能已经被删掉了"));
+        };
+        account.msa = Some(MsaCredentials {
+            refresh_token: out.tokens.refresh_token.clone(),
+            mc_access_token: out.session.mc_access_token.clone(),
+            mc_expires_ms: mc_expires_at(out.session.expires_in),
+        });
+        // 官方档案改过名就跟着更新
+        account.username = out.session.name.clone();
+        store.upsert(account.clone());
+        save(&self.layout, &store)?;
+        Ok(view(&account, store.active_id.as_deref()))
+    }
+
     // ---------- 管理 ----------
 
     /// 删除账号（含服务器侧登出，失败也删）。
@@ -375,10 +735,10 @@ impl AppState {
             .iter()
             .position(|a| a.id == id)
             .ok_or_else(|| AppError::not_found("账号不存在", "它可能已经被删掉了"))?;
-        if store.accounts[index].is_authlib() {
+        if store.accounts[index].kind != AccountKind::Offline {
             return Err(AppError::unsupported(
-                "第三方账号不能选默认皮肤",
-                "皮肤和模型由认证服务器决定",
+                "只有离线账号能选默认皮肤",
+                "微软与第三方账号的皮肤由账号自身决定",
             ));
         }
         store.accounts[index].skin_model = Some(model);
@@ -399,6 +759,61 @@ impl AppState {
     }
 
     // ---------- 启动时用 ----------
+
+    /// 启动前的登录态总保证。按账号类型分派：
+    /// 离线不联网；第三方走 validate/refresh；微软走静默续期。
+    pub(crate) async fn ensure_account_session(&self) -> Result<(), AppError> {
+        let kind = {
+            let store = self.lock_accounts();
+            store.active().map(|a| a.kind)
+        };
+        match kind {
+            Some(AccountKind::Authlib) => self.ensure_authlib_session().await,
+            Some(AccountKind::Microsoft) => self.ensure_microsoft_session().await,
+            _ => Ok(()),
+        }
+    }
+
+    /// 启动前的微软会话保证。原则与第三方账号同源（见 `ensure_authlib_session`）：
+    /// **网络不通不拦启动** —— 记账过期时间提前了 1 小时，「记账过期」时
+    /// 旧令牌往往还能再用一小时，宁可带旧凭据让游戏自己报错，也别因为一次
+    /// 抖动把人挡在门外。只有服务端明确说「登录态不认了」（invalid_grant）
+    /// 才要求重新登录；网络失败时仅当**硬过期**（记账 + 1 小时）才拦。
+    pub(crate) async fn ensure_microsoft_session(&self) -> Result<(), AppError> {
+        let account = {
+            let store = self.lock_accounts();
+            store.active().cloned()
+        };
+        let Some(account) = account else {
+            return Ok(());
+        };
+        if !account.is_microsoft() || account.msa.is_none() {
+            // 缺凭据的情况交给 `player_profile` 报，那里的文案更具体
+            return Ok(());
+        }
+        match self.renew_msa(&account, false).await {
+            Ok(_) => Ok(()),
+            Err(err) if err.code == ErrorCode::Network => {
+                let hard_expired = account
+                    .msa
+                    .as_ref()
+                    .is_some_and(|c| xcl_auth::now_ms() >= mc_hard_expires_at(c));
+                if hard_expired {
+                    return Err(AppError::network(
+                        "登录状态无法续期",
+                        format!(
+                            "{} 的游戏令牌已经过期，续期又连不上微软服务",
+                            account.username
+                        ),
+                    )
+                    .with_hint("检查网络后重试；网络恢复后启动时会自动续期"));
+                }
+                warn!(error = %err, "微软登录续期失败，先带旧凭据启动");
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
 
     /// 当前账号的玩家档案。给 `xcl_core::launch::PlayerProfile` 用。
     ///
@@ -521,6 +936,23 @@ impl AppState {
                     // authlib 兼容 Mojang 协议，userType 用 mojang，
                     // 第三方服务器统计上按 mojang 归类更老实
                     user_type: "mojang".to_string(),
+                })
+            }
+            Some(account) if account.is_microsoft() => {
+                let creds = account.msa.as_ref().ok_or_else(|| {
+                    AppError::validation(
+                        "这个账号还没有登录凭据",
+                        format!("{} 的登录状态已失效", account.username),
+                    )
+                    .with_hint("在启动页点账号卡片，对这个微软账号重新登录一次")
+                })?;
+                Ok(PlayerProfile {
+                    name: account.username.clone(),
+                    uuid: account.uuid.clone(),
+                    access_token: creds.mc_access_token.clone(),
+                    // 微软正版走官方服务，userType 用 msa（uuid 也是官方档案的，
+                    // 不能做离线皮肤那套末 5 位微调）
+                    user_type: "msa".to_string(),
                 })
             }
             Some(account) => {
@@ -700,6 +1132,10 @@ impl AppState {
             .unwrap_or_else(|e| e.into_inner())
     }
 
+    fn lock_msa_login(&self) -> std::sync::MutexGuard<'_, Option<MsaPendingLogin>> {
+        self.msa_login.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     fn store_authlib_account(
         &self,
         account: Account,
@@ -803,6 +1239,7 @@ fn build_account(
         client_token: Some(
             existing_token.unwrap_or_else(|| session.client_token.clone()),
         ),
+        msa: None,
     }
 }
 
@@ -839,6 +1276,7 @@ mod tests {
             password: Some("secret".into()),
             access_token: Some("tok".into()),
             client_token: Some("ct".into()),
+            msa: None,
         };
         store.upsert(authlib);
         save(&layout, &store).unwrap();
@@ -876,6 +1314,7 @@ mod tests {
             password: Some("secret".into()),
             access_token: Some("tok".into()),
             client_token: Some("ct".into()),
+            msa: None,
         };
         let v = view(&account, Some("a1"));
         assert!(v.active);
@@ -962,5 +1401,93 @@ mod tests {
         assert_eq!(urls.len(), 2);
         assert!(urls[0].starts_with("https://authlib-injector.yushi.moe/"));
         assert!(urls[1].starts_with("https://bmclapi2.bangbang93.com/mirrors/authlib-injector/"));
+    }
+
+    #[test]
+    fn msa_pending_login_paces_polls() {
+        // interval=5s：到点前不查、到点才查
+        let mut pending = MsaPendingLogin::new("dev".into(), 900, 5, 1_000);
+        assert!(!pending.poll_due(1_000), "刚建好还没到首个间隔");
+        assert!(pending.poll_due(6_000));
+        pending.note_pending(6_000);
+        assert!(!pending.poll_due(6_001));
+        assert!(pending.poll_due(11_000));
+    }
+
+    #[test]
+    fn msa_slow_down_increments_interval_permanently() {
+        // RFC 8628：slow_down 后间隔永久 +5 秒，不是只加一次
+        let mut pending = MsaPendingLogin::new("dev".into(), 900, 5, 0);
+        pending.note_slow_down(0);
+        assert_eq!(pending.interval_ms, 10_000);
+        assert!(pending.poll_due(10_000));
+        pending.note_slow_down(10_000);
+        assert_eq!(pending.interval_ms, 15_000);
+    }
+
+    #[test]
+    fn msa_poll_tolerates_three_network_failures() {
+        // 玩家正在输码：连续 3 次传输失败继续等，第 4 次才终止
+        let mut pending = MsaPendingLogin::new("dev".into(), 900, 5, 0);
+        assert!(pending.note_failure(0));
+        assert!(pending.note_failure(0));
+        assert!(pending.note_failure(0));
+        assert!(!pending.note_failure(0), "第 4 次失败该终止");
+    }
+
+    #[test]
+    fn msa_pending_expiry_only_governs_waiting_phase() {
+        let pending = MsaPendingLogin::new("dev".into(), 900, 5, 0);
+        assert!(!pending.is_expired(899_000));
+        assert!(pending.is_expired(900_000));
+    }
+
+    #[test]
+    fn msa_expiry_margin_matches_pcl() {
+        // PCL：expires_in + now − 3600（提前 1 小时视作过期）
+        let before = xcl_auth::now_ms();
+        let at = mc_expires_at(86_400);
+        let after = xcl_auth::now_ms();
+        let expected_low = before + (86_400 - MSA_EXPIRY_MARGIN_SECS) * 1000;
+        let expected_high = after + (86_400 - MSA_EXPIRY_MARGIN_SECS) * 1000;
+        assert!((expected_low..=expected_high).contains(&at), "提前量算错：{at}");
+        // 硬过期 = 记账 + 提前量 = 真实 expires_in
+        let creds = MsaCredentials {
+            refresh_token: "r".into(),
+            mc_access_token: "m".into(),
+            mc_expires_ms: at,
+        };
+        assert_eq!(mc_hard_expires_at(&creds) - at, MSA_EXPIRY_MARGIN_SECS * 1000);
+    }
+
+    #[test]
+    fn msa_account_save_load_roundtrip() {
+        let layout = temp_layout("msa-roundtrip");
+        let mut store = AccountStore::default();
+        let account = build_msa_account(
+            &xcl_auth::msa::McSession {
+                mc_access_token: "mc-tok".into(),
+                expires_in: 86_400,
+                uuid: "a".repeat(32),
+                name: "Steve".into(),
+            },
+            &MsaTokens {
+                access_token: "ms-tok".into(),
+                refresh_token: "rt-1".into(),
+                expires_in: 3_600,
+            },
+        );
+        let id = account.id.clone();
+        store.upsert(account);
+        store.set_active(&id);
+        save(&layout, &store).unwrap();
+
+        let loaded = load(&layout).unwrap();
+        let found = loaded.find(&id).unwrap();
+        assert!(found.is_microsoft());
+        let creds = found.msa.as_ref().unwrap();
+        assert_eq!(creds.refresh_token, "rt-1");
+        assert_eq!(creds.mc_access_token, "mc-tok");
+        assert!(creds.mc_expires_ms > 0);
     }
 }

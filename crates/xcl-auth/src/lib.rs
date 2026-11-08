@@ -1,6 +1,6 @@
 //! 账号。
 //!
-//! 支持两类登录（微软登录不在范围内 —— 需要正版账号才能验证，见项目决策）：
+//! 支持三类登录：
 //!
 //! 1. 离线（legacy）：只有用户名，UUID 由用户名派生，不联网。
 //!    这是 Mojang 官方离线模式的通行算法，同一名字在任何启动器里 UUID 相同，
@@ -10,9 +10,13 @@
 //!    `/authserver/authenticate` 系列接口，拿 accessToken + 角色档案。
 //!    启动时通过 `-javaagent:authlib-injector.jar=<服务器>` 让游戏客户端
 //!    把认证请求改道到这个服务器。
+//! 3. 微软登录（正版）：设备代码流换微软令牌，再走 Xbox → Minecraft 服务
+//!    拿游戏令牌（见 `msa` 子模块）。启动参数 `--userType msa`，游戏直接
+//!    连官方服务，不需要 javaagent。
 //!
-//! 本 crate 只放纯数据结构与校验（零 IO），HTTP 在 `yggdrasil` 子模块。
+//! 本 crate 只放纯数据结构与校验（零 IO），HTTP 在 `yggdrasil` / `msa` 子模块。
 
+pub mod msa;
 pub mod yggdrasil;
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +30,8 @@ pub enum AccountKind {
     Offline,
     /// 第三方认证服务器（Yggdrasil 协议）
     Authlib,
+    /// 微软正版（Xbox / Minecraft 服务）
+    Microsoft,
 }
 
 impl AccountKind {
@@ -33,6 +39,7 @@ impl AccountKind {
         match self {
             AccountKind::Offline => "离线",
             AccountKind::Authlib => "第三方",
+            AccountKind::Microsoft => "微软",
         }
     }
 }
@@ -65,13 +72,28 @@ impl SkinModel {
     }
 }
 
+/// 微软账号的登录凭据。
+///
+/// 只存两样：长期的微软 refresh token（续期靠它，不用再打扰玩家）和
+/// 当前的游戏令牌（启动用，约 24 小时）。微软层的 access token 是
+/// 过路货，换完 Xbox 链就扔，不落盘。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MsaCredentials {
+    /// 微软 refresh token。长期有效，续期时会轮换（旧的作废）。
+    pub refresh_token: String,
+    /// Minecraft 服务的 access token，启动时给游戏。
+    pub mc_access_token: String,
+    /// 游戏令牌过期时间（Unix 毫秒）。
+    pub mc_expires_ms: i64,
+}
+
 /// 一个账号。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     /// 稳定 id。换名字、换 token 都不变，前端拿它定位。
     pub id: String,
     pub kind: AccountKind,
-    /// 显示名。离线 = 玩家名；第三方 = 角色名（profile name）。
+    /// 显示名。离线 = 玩家名；第三方 = 角色名（profile name）；微软 = 角色名。
     pub username: String,
     /// 32 位十六进制、无横杠。
     ///
@@ -98,6 +120,11 @@ pub struct Account {
     pub access_token: Option<String>,
     /// 客户端标识。同一设备上保持稳定，服务端靠它判断「是不是同一个客户端」。
     pub client_token: Option<String>,
+
+    // ---- 以下仅 Microsoft ----
+    /// 微软登录凭据。旧账号文件没有这个字段，反序列化就是 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msa: Option<MsaCredentials>,
 }
 
 impl Account {
@@ -117,11 +144,16 @@ impl Account {
             password: None,
             access_token: None,
             client_token: None,
+            msa: None,
         })
     }
 
     pub fn is_authlib(&self) -> bool {
         self.kind == AccountKind::Authlib
+    }
+
+    pub fn is_microsoft(&self) -> bool {
+        self.kind == AccountKind::Microsoft
     }
 }
 
@@ -382,5 +414,64 @@ mod tests {
     fn offline_account_gets_created_at() {
         let account = Account::offline("Steve").unwrap();
         assert!(account.created_at_ms > 0, "新建账号必须带创建时间");
+    }
+
+    #[test]
+    fn account_kind_serializes_snake_case() {
+        // accounts.toml 里是 snake_case，换版本不能把老文件读坏
+        assert_eq!(
+            serde_json::to_string(&AccountKind::Offline).unwrap(),
+            "\"offline\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AccountKind::Authlib).unwrap(),
+            "\"authlib\""
+        );
+        assert_eq!(
+            serde_json::to_string(&AccountKind::Microsoft).unwrap(),
+            "\"microsoft\""
+        );
+    }
+
+    #[test]
+    fn old_account_file_without_msa_still_loads() {
+        // 老 accounts.toml 没有 msa 字段 —— 反序列化必须照常
+        let json = r#"{
+            "id": "a1", "kind": "offline", "username": "Steve",
+            "uuid": "069a79f444e94726a5eb5722ba6cc974",
+            "server_url": null, "email": null, "password": null,
+            "access_token": null, "client_token": null
+        }"#;
+        let account: Account = serde_json::from_str(json).unwrap();
+        assert!(account.msa.is_none());
+        assert_eq!(account.kind, AccountKind::Offline);
+    }
+
+    #[test]
+    fn msa_credentials_round_trip() {
+        let account = Account {
+            id: "m1".into(),
+            kind: AccountKind::Microsoft,
+            username: "Steve".into(),
+            uuid: "a".repeat(32),
+            created_at_ms: 1,
+            skin_model: None,
+            server_url: None,
+            email: None,
+            password: None,
+            access_token: None,
+            client_token: None,
+            msa: Some(MsaCredentials {
+                refresh_token: "rt".into(),
+                mc_access_token: "mc".into(),
+                mc_expires_ms: 123,
+            }),
+        };
+        let json = serde_json::to_string(&account).unwrap();
+        let back: Account = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, account);
+        let creds = back.msa.unwrap();
+        assert_eq!(creds.refresh_token, "rt");
+        assert_eq!(creds.mc_access_token, "mc");
     }
 }

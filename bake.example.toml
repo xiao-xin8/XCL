@@ -15,3 +15,8 @@ accountServer = ""
 
 [update]
 manifestUrl = ""
+
+[msa]
+# 微软登录的应用 client id（Azure 应用注册的 Application (client) ID）。
+# 留空则这个构建不提供微软登录，其余功能照常。
+clientId = ""

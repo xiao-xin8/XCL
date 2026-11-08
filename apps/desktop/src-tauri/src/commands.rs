@@ -27,6 +27,7 @@ use xcl_service::resources::{
 };
 use xcl_service::local::LocalVersion;
 use xcl_service::update::{UpdateSink, UpdateView};
+use xcl_update::ChangelogRelease;
 use xcl_service::versions::{SourceTestView, VersionListView};
 use xcl_service::AppState;
 
@@ -270,12 +271,45 @@ pub fn storage_info(
 }
 
 /// 清理指定缓存。缓存不属于数据，删了只会让下次重新下载。
+///
+/// 返回清理结果：`pending` 表示界面内核的缓存只登记了请求，需要重启才真正删掉。
 #[tauri::command]
 pub fn storage_clear(
     state: State<'_, Arc<AppState>>,
     kind: xcl_service::storage::CacheKind,
-) -> Result<(), AppError> {
+) -> Result<xcl_service::storage::ClearResult, AppError> {
     state.cache_clear(kind)
+}
+
+/// 重启应用。
+///
+/// 只给「清理浏览器内核缓存」用：那部分文件运行时删会把界面搞崩，
+/// 必须让新进程在 WebView2 创建之前完成清理。命令不会返回 —— `restart()` 直接换进程。
+///
+/// 正在下载时拦一道：重启会直接掐掉传输，虽然有断点续传，也不能招呼都不打。
+#[tauri::command]
+pub fn restart_app(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), AppError> {
+    use xcl_service::download::TaskPhase;
+
+    let busy = state
+        .tasks()
+        .list()
+        .iter()
+        .any(|task| task.phase == TaskPhase::Running);
+    if busy {
+        return Err(AppError::validation("还有下载没完成", "等任务结束再清理浏览器缓存")
+            .with_hint("缓存清理已经登记，下次启动会自动完成"));
+    }
+
+    // ⚠️ 不能省。AppHandle::restart() 是 spawn + std::process::exit(0)，
+    // 跳过了 RunEvent::Exit；单实例插件的 named mutex 平时就靠那个事件释放。
+    // 不手动 destroy，新进程会被当成「已经有一个在跑」而直接退出 ——
+    // 用户看到的就是「点完清理，软件关了，再也没起来」。
+    tauri_plugin_single_instance::destroy(&app);
+    app.restart();
 }
 
 /// 版本清单：Rust 侧已完成拉取、解析、分组与排序，并带 TTL 缓存。
@@ -864,6 +898,34 @@ pub async fn account_add_authlib(
     Ok(outcome)
 }
 
+/// 微软登录第一步：取设备码。
+///
+/// 返回验证码与输码网址，前端展示后定时调 `account_msa_poll` 等结果。
+/// 已有进行中的登录会被顶掉（重新点登录 = 重来一轮）。
+#[tauri::command]
+pub async fn account_msa_begin(
+    state: State<'_, Arc<AppState>>,
+) -> Result<xcl_service::auth::MsaLoginStart, AppError> {
+    state.msa_begin().await
+}
+
+/// 微软登录轮询。没到点直接回 `waiting`（节奏由后端把关，前端随便 tick）。
+///
+/// `done` 时账号已入库并置为当前。错误即终止（取消/过期/封禁……）；
+/// 网络抖动由后端容忍，不会冒出来。
+#[tauri::command]
+pub async fn account_msa_poll(
+    state: State<'_, Arc<AppState>>,
+) -> Result<xcl_service::auth::MsaPollView, AppError> {
+    state.msa_poll().await
+}
+
+/// 取消进行中的微软登录（关弹窗）。
+#[tauri::command]
+pub fn account_msa_cancel(state: State<'_, Arc<AppState>>) {
+    state.msa_cancel();
+}
+
 /// 设置离线账号的默认皮肤模型（Steve / Alex）。
 #[tauri::command]
 pub fn account_set_skin_model(
@@ -883,13 +945,14 @@ pub fn account_set_active(
     state.set_active_account(&id)
 }
 
-/// 刷新第三方账号的 token（需要登录时选了「记住密码」）。
+/// 刷新账号的登录凭据。按类型分派：第三方（需登录时存了密码）、
+/// 微软（静默续期，轮换 token 会自动落盘）。
 #[tauri::command]
 pub async fn account_refresh(
     state: State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<xcl_service::auth::AccountView, AppError> {
-    state.refresh_authlib_account(&id).await
+    state.refresh_account(&id).await
 }
 
 /// 删除账号（会先在服务器侧登出，失败也删）。
@@ -984,6 +1047,15 @@ const UPDATE_EVENT: &str = "update://state";
 #[tauri::command]
 pub fn update_status(state: State<'_, Arc<AppState>>) -> UpdateView {
     state.update_view()
+}
+
+/// 更新日志。只用于展示，不验签；后端在本次进程里缓存。
+#[tauri::command]
+pub async fn update_changelog(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<ChangelogRelease>, AppError> {
+    let state = Arc::clone(state.inner());
+    state.update_changelog().await
 }
 
 /// 拉清单、验签、比版本。不写任何文件（强制更新状态除外，它必须落盘）。

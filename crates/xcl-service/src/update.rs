@@ -22,7 +22,7 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use xcl_core::{AppError, ErrorCode};
 use xcl_download::{DownloadItem, DownloadOptions, Progress};
-use xcl_update::{CheckState, Manifest, SignatureCheck};
+use xcl_update::{ChangelogRelease, CheckState, Manifest, SignatureCheck};
 
 use crate::AppState;
 use crate::download::SAMPLE_MS;
@@ -126,6 +126,24 @@ pub fn current_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// 更新日志和清单放同一目录，从清单地址推导，不额外增加一个内置地址。
+fn changelog_url() -> Result<String, AppError> {
+    let manifest = xcl_core::config::UPDATE_MANIFEST_ENDPOINT.trim_end_matches('/');
+    if manifest.is_empty() {
+        return Err(AppError::unsupported(
+            "这个版本没有更新服务",
+            "更新地址没有打进这个构建",
+        ));
+    }
+    let Some((dir, _)) = manifest.rsplit_once('/') else {
+        return Err(AppError::parse(
+            "更新日志地址无效",
+            format!("无法从更新地址推导更新日志：{manifest}"),
+        ));
+    };
+    Ok(format!("{dir}/changelog.json"))
+}
+
 /// 更新状态机的内部状态。
 #[derive(Default)]
 pub struct UpdateState {
@@ -142,6 +160,8 @@ struct Inner {
     cancel: Option<CancellationToken>,
     /// 从配置里恢复的强制更新状态
     force: ForceInfo,
+    /// 更新日志。纯展示数据，同一个进程里只拉一次。
+    changelog: Option<Vec<ChangelogRelease>>,
 }
 
 /// 强制更新的持久化副本。存在配置里，指向一个「必须装到」的版本。
@@ -197,6 +217,14 @@ impl UpdateState {
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         // 锁里没有会 panic 的代码
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn changelog_snapshot(&self) -> Option<Vec<ChangelogRelease>> {
+        self.lock().changelog.clone()
+    }
+
+    fn set_changelog(&self, releases: Vec<ChangelogRelease>) {
+        self.lock().changelog = Some(releases);
     }
 
     pub fn snapshot(&self) -> UpdateView {
@@ -378,6 +406,21 @@ impl UpdateState {
 impl AppState {
     pub fn update_view(&self) -> UpdateView {
         self.update.snapshot()
+    }
+
+    /// 拉更新日志。纯展示数据，不验签；同一个进程里只请求一次。
+    ///
+    /// 失败不缓存 —— 下次展开还能重试。
+    pub async fn update_changelog(&self) -> Result<Vec<ChangelogRelease>, AppError> {
+        if let Some(cached) = self.update.changelog_snapshot() {
+            return Ok(cached);
+        }
+
+        let url = changelog_url()?;
+        let (text, _source) = self.fetch_meta_text(&url).await?;
+        let parsed = xcl_update::Changelog::parse(&text)?;
+        self.update.set_changelog(parsed.releases.clone());
+        Ok(parsed.releases)
     }
 
     /// 拉清单、验签、比版本。不改任何文件（除了把强制更新状态落盘）。

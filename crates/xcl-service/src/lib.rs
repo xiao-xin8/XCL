@@ -48,6 +48,7 @@ pub mod update;
 pub mod version_admin;
 pub mod version_settings;
 pub mod versions;
+pub mod webview_cache;
 
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -109,6 +110,11 @@ pub struct AppState {
     /// 串行化 authlib-injector 的下载/落盘：登录后的后台预取和启动前的
     /// 保证可能同时发生，两个任务不能同时写同一个临时文件。
     authlib_jar_lock: tokio::sync::Mutex<()>,
+    /// 微软设备码登录的进行中状态（验证码 + 轮询节奏）。
+    /// `None` = 没有正在进行的登录。轮询命令按 `&self` 进来，得能改它。
+    msa_login: Mutex<Option<auth::MsaPendingLogin>>,
+    /// 微软账号续期的并发保护：启动前自动续期与手动「刷新登录」可能撞车。
+    msa_refresh_lock: tokio::sync::Mutex<()>,
     /// 自动选源的探测结论。`None` 表示还没测过。
     probe: Mutex<Option<ProbeResult>>,
     /// 自更新的状态机（检查 / 下载 / 应用）。
@@ -160,6 +166,8 @@ impl AppState {
             accounts: RwLock::new(accounts),
             favorites: RwLock::new(favorites),
             authlib_jar_lock: tokio::sync::Mutex::new(()),
+            msa_login: Mutex::new(None),
+            msa_refresh_lock: tokio::sync::Mutex::new(()),
             probe: Mutex::new(None),
             update,
         })
@@ -196,6 +204,8 @@ impl AppState {
                     accounts: RwLock::new(accounts),
                     favorites: RwLock::new(favorites),
                     authlib_jar_lock: tokio::sync::Mutex::new(()),
+                    msa_login: Mutex::new(None),
+                    msa_refresh_lock: tokio::sync::Mutex::new(()),
                     probe: Mutex::new(None),
                     update,
                 }
