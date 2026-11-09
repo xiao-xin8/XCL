@@ -8,7 +8,7 @@
 
 它做的事：
 
-1. 从 `xcl-launcher/Cargo.toml` 读 `[workspace.package] version` —— **版本号唯一来源**；
+1. 从 `xcl-launcher/Cargo.toml` 读 `[workspace.package] version` —— 版本号唯一来源；
 2. 在 `target/release/` 里找构建出来的 exe；
 3. 算 SHA-256 和字节数；
 4. 把 exe 复制成 `<cloud>/XCL-<版本>.exe`；
@@ -36,7 +36,7 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
-# 脚本在 <repo>/scripts/ 下，仓库根是它的父目录；cloud 在**项目根**（仓库外）
+# 脚本在 <repo>/scripts/ 下，仓库根是它的父目录；cloud 在项目根（仓库外）
 SCRIPT = Path(__file__).resolve()
 REPO = SCRIPT.parent.parent
 PROJECT = REPO.parent
@@ -78,9 +78,9 @@ def sync_tauri_version(version: str) -> None:
     """把版本写进 tauri.conf.json。
 
     PE 里的 FileVersion / ProductVersion 取自这个字段 —— 不写就没有版本信息。
-    版本号的**唯一来源**仍然是 Cargo.toml，这里只是把它同步过去。
+    版本号的唯一来源仍然是 Cargo.toml，这里只是把它同步过去。
 
-    注意**必须在构建之前跑**：exe 里的版本信息是编译期写进去的，
+    注意必须在构建之前跑：exe 里的版本信息是编译期写进去的，
     构建完再改配置，产物里还是旧版本号。
     """
     conf = REPO / "apps" / "desktop" / "src-tauri" / "tauri.conf.json"
@@ -133,7 +133,7 @@ def version_key(version: str) -> tuple[int, int, int]:
 def write_changelog(manifest: dict) -> None:
     """把这一版并进更新日志。
 
-    更新日志是**只增**的历史：同一版本重跑发布脚本时覆盖那一条，而不是再插一条。
+    更新日志是只增的历史：同一版本重跑发布脚本时覆盖那一条，而不是再插一条。
     `update.json` 只保留最新版，页面和启动器要翻历史时都读这个文件。
     """
     entry = {
@@ -246,7 +246,7 @@ def main() -> int:
 
     # 分发名就是程序名，不带版本号：
     # 自更新替换的是「当前正在运行的那个文件名」，名字里带版本会导致
-    # 每更新一次文件名变一次，用户的快捷方式/固定到任务栏的图标全断。
+    # 每更新一次文件名变一次，快捷方式/固定到任务栏的图标全断。
     exe_name = exe.name
     # 压缩包名带版本号：每次发的包内容不同，CDN / 浏览器缓存不会串。
     # 空格一律换成连字符 —— URL 里编码成 %20 虽然能用，但不好看也不好排查。

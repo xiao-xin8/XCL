@@ -573,7 +573,7 @@ function AccountDetail(props: {
  * 底下的「详细信息」卡：把角色的细项摊开摆一摆，右栏不会空荡荡。
  * 离线 / 第三方信息少些；微软账号以后的皮肤管理也挂这一片。
  *
- * ⚠️ 所有信息行**始终渲染**（皮肤还没到就先显示预期值）：条件渲染会让
+ * ⚠️ 所有信息行始终渲染（皮肤还没到就先显示预期值）：条件渲染会让
  * 卡片在皮肤加载完再长高一截，切换账号的落下动画播完又「重载」一下。
  */
 function AccountExtraInfo(props: { account: AccountView; skin: SkinRender | null }) {

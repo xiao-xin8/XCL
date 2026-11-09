@@ -284,7 +284,7 @@ impl AppState {
             });
         }
 
-        self.spawn_task(items, &version_id, None, None, parent, Some(task_id), emit)
+        self.spawn_task(items, &version_id, None, None, parent, Some(task_id), emit, None)
             .await
     }
 
@@ -304,6 +304,7 @@ impl AppState {
         parent: Option<&str>,
         task_id: Option<String>,
         emit: ProgressSink,
+        on_success: Option<Box<dyn FnOnce() + Send>>,
     ) -> Result<TaskView, AppError> {
         if items.is_empty() {
             return Err(AppError::unsupported(
@@ -346,7 +347,15 @@ impl AppState {
 
         tokio::spawn(async move {
             run_task(
-                state, task_id, items, fetcher, progress, options, cancel, emit,
+                state,
+                task_id,
+                items,
+                fetcher,
+                progress,
+                options,
+                cancel,
+                emit,
+                on_success,
             )
             .await;
         });
@@ -374,6 +383,7 @@ impl AppState {
         title: String,
         target: String,
         emit: ProgressSink,
+        on_success: Option<Box<dyn FnOnce() + Send>>,
     ) -> Result<TaskView, AppError> {
         let policy = self.download_policy();
         let urls = policy.candidates(url_kind(kind), url);
@@ -402,6 +412,7 @@ impl AppState {
             None,
             None,
             emit,
+            on_success,
         )
         .await
     }
@@ -434,6 +445,7 @@ pub(crate) async fn run_task(
     options: DownloadOptions,
     cancel: CancellationToken,
     emit: ProgressSink,
+    on_success: Option<Box<dyn FnOnce() + Send>>,
 ) {
     let download = xcl_download::run(
         items,
@@ -510,6 +522,15 @@ pub(crate) async fn run_task(
         TaskPhase::Cancelled => Some("已取消，已完成的文件保留".to_string()),
         TaskPhase::Running => None,
     };
+
+    // 只在真正成功时回调，并且放在「任务完成」事件之前：
+    // 前端收到 done 立刻打开管理器时，来源已经落盘。
+    if !summary.cancelled
+        && summary.failed == 0
+        && let Some(callback) = on_success
+    {
+        callback();
+    }
 
     state.tasks().update(view.clone());
     emit(view);

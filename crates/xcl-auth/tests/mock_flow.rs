@@ -282,7 +282,7 @@ async fn poll_declined_gives_friendly_error() {
     assert!(text.contains("取消"), "要提示是玩家取消的：{text}");
 }
 
-/// XSTS 拒绝：PCL 码表的话术（没注册 Xbox 账户 / 地区 / 年龄 / 封禁）。
+/// XSTS 拒绝：固定码表的话术（没注册 Xbox 账户 / 地区 / 年龄 / 封禁）。
 #[tokio::test]
 async fn xsts_xerr_maps_to_pcl_messages() {
     for (code, expect) in [
@@ -415,8 +415,8 @@ async fn profile_404_reports_missing_profile() {
     assert!(format!("{err:?}").contains("角色"), "{err:?}");
 }
 
-/// ⚠️ 轮换落盘顺序：refresh 拿到新 refresh token 后**必须先回调落盘**，
-/// 再跑 Xbox 链。链失败也不能把轮换后的 token 丢了（丢了 = 用户被踢下线）。
+/// ⚠️ 轮换落盘顺序：refresh 拿到新 refresh token 后必须先回调落盘，
+/// 再跑 Xbox 链。链失败也不能把轮换后的 token 丢了（丢了 = 账号会被踢下线）。
 #[tokio::test]
 async fn rotated_refresh_token_is_saved_before_chain_even_on_chain_failure() {
     let mut routes = HashMap::new();
@@ -503,7 +503,7 @@ async fn refresh_full_success_returns_rotated_tokens_and_session() {
     assert_log_has(&logs(&log), "/mclogin", &["XBL3.0 x=h2;s2"]);
 }
 
-/// refresh 时服务端说「必须重新登录」→ 明确的过期错误（PCL Relogin 条件）。
+/// refresh 时服务端说「必须重新登录」→ 明确的过期错误。
 #[tokio::test]
 async fn refresh_invalid_grant_requires_relogin() {
     let mut routes = HashMap::new();

@@ -24,6 +24,7 @@ use std::time::Duration;
 use xcl_core::AppError;
 use xcl_source::UrlKind;
 
+use crate::content::ContentKind;
 use crate::download::{ProgressSink, TaskView};
 use crate::{isolation, local, AppState};
 
@@ -548,6 +549,42 @@ impl AppState {
         let filename = safe_filename(&file.filename);
         let dest = dest_dir.join(&filename);
 
+        // 装进某个版本时才记来源；自定义目录没有版本可挂。
+        // 回调在下载真正成功后才跑，失败 / 取消不会留下来源记录。
+        let origin_kind = match kind {
+            ResourceKind::Mod => Some(ContentKind::Mod),
+            ResourceKind::ResourcePack => Some(ContentKind::Resourcepack),
+            ResourceKind::Shader => Some(ContentKind::Shader),
+            ResourceKind::Modpack => None,
+        };
+        let success_hook: Option<Box<dyn FnOnce() + Send>> = origin_kind.and_then(|content_kind| {
+            target_version_id.map(|version_id| {
+                let state = Arc::clone(self);
+                let version_id = version_id.to_string();
+                let file_name = filename.clone();
+                let size = file.size;
+                let sha1 = file.sha1.clone();
+                let source_name = source.as_str().to_string();
+                let project_id = id.to_string();
+                let file_version_id = file_id.to_string();
+                let hook: Box<dyn FnOnce() + Send> = Box::new(move || {
+                    if let Err(err) = state.record_content_origin(
+                        content_kind,
+                        &version_id,
+                        &file_name,
+                        size,
+                        sha1,
+                        &source_name,
+                        &project_id,
+                        &file_version_id,
+                    ) {
+                        tracing::warn!(error = %err, kind = ?content_kind, "记录内容来源失败");
+                    }
+                });
+                hook
+            })
+        });
+
         if dest.exists() {
             return Err(AppError::validation(
                 "这个文件已经装过了",
@@ -579,6 +616,7 @@ impl AppState {
             filename,
             target,
             emit,
+            success_hook,
         )
         .await
     }

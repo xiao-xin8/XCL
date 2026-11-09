@@ -27,6 +27,7 @@ pub mod connect_account;
 pub mod connect_job;
 pub mod connect_node;
 pub mod connect_session;
+pub mod content;
 pub mod download;
 pub mod favorites;
 pub mod folders;
@@ -130,7 +131,7 @@ impl AppState {
         paths::ensure_dir(layout.root())?;
         let config = config::load(&layout)?;
         // 账号服务地址先交给 `connect_account`：下面那些不接 `AppState` 的
-        // 内部小函数要从模块级拿到它。地址是构建期注入的，不是用户配置。
+        // 内部小函数要从模块级拿到它。地址是构建期注入的，不是配置项。
         connect_account::configure_server(xcl_core::config::ACCOUNT_SERVER_ENDPOINT);
         // 空表就是空表：不再自动补离线账号。约定「没有账号就不许启动」，
         // 补一个 invisible 的账号只会让「为什么没添加却能玩」变成灵异问题

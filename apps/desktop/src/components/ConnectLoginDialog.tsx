@@ -104,7 +104,7 @@ export default function ConnectLoginDialog({
         registering ? "connect_account_register" : "connect_account_login",
         { username: username.trim(), password },
       );
-      // 只记用户名，绝不记密码：下次打开省一次输入，但密码永远由用户自己敲。
+      // 只记用户名，绝不记密码：下次打开省一次输入，但密码永远自己敲。
       localStorage.setItem("xcl.connect.username", username.trim());
       // 密码清掉再交出去，别让弹窗关闭期间还挂在内存里
       setPassword("");

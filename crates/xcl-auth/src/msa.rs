@@ -4,7 +4,7 @@
 //! 验证码，玩家去浏览器输码登录，启动器这边轮询等结果。不用嵌浏览器、
 //! 不用注册回调地址，桌面程序最省事的一条路。
 //!
-//! 完整链路六步（与 PCL 行为一致，见 `docs/MSA-RESEARCH-PCL.md`）：
+//! 完整链路六步：
 //!
 //! | 步骤 | 端点 | 用途 |
 //! |---|---|---|
@@ -13,15 +13,13 @@
 //! | 3 | `POST user.auth.xboxlive.com/user/authenticate` | 微软令牌 → Xbox 令牌 |
 //! | 4 | `POST xsts.auth.xboxlive.com/xsts/authorize` | Xbox 令牌 → XSTS 令牌 |
 //! | 5 | `POST api.minecraftservices.com/authentication/login_with_xbox` | XSTS → 游戏令牌 |
-//! | 5b | `GET …/entitlements/mcstore` | 验证买了游戏（PCL Step5） |
+//! | 5b | `GET …/entitlements/mcstore` | 验证买了游戏 |
 //! | 6 | `GET …/minecraft/profile` | 取 UUID 与角色名 |
 //!
 //! 游戏令牌约 24 小时过期，微软 refresh token 是长期的 —— 平时续期只用
-//! refresh token。⚠️ 微软的 refresh token 是**轮换制**：用一次旧的作废、
+//! refresh token。⚠️ 微软的 refresh token 是轮换制：用一次旧的作废、
 //! 响应带新的。所以续期必须「先落盘新 token，再跑 Xbox 链」（`refresh_full`
 //! 的 `on_rotated` 回调就是为此存在），链中途失败也不能把新 token 丢掉。
-//!
-//! 协议细节、错误文案与踩坑出处见 `docs/MSA-RESEARCH-REF.md`。
 
 use serde::{Deserialize, Serialize};
 use xcl_core::AppError;
@@ -124,7 +122,7 @@ pub enum DevicePoll {
 // ---------- 客户端 ----------
 
 /// 微软认证客户端。`client_id` 是 Azure 应用注册的 Application (client) ID，
-/// 构建期注入（`bake.toml`）—— 这是应用自己的身份，不是用户配置。
+/// 构建期注入（`bake.toml`）—— 这是应用自己的身份，不是配置项。
 pub struct MsaClient {
     http: reqwest::Client,
     client_id: String,
@@ -194,7 +192,7 @@ impl MsaClient {
     ///
     /// 调用方负责按 `interval` 控制节奏 —— 这里只忠实翻译服务端的回答。
     /// `authorization_pending` / `slow_down` 是「还没好」（注意它们是 HTTP 400
-    /// 但属于**答案**不是故障，所以先读 body 再判 status）；
+    /// 但属于答案不是故障，所以先读 body 再判 status）；
     /// 玩家点了取消、验证码过期等终止性错误直接抛。
     pub async fn poll_device_token(&self, device_code: &str) -> Result<DevicePoll, AppError> {
         let resp = self
@@ -249,8 +247,8 @@ impl MsaClient {
 
     /// 用 refresh token 静默换新的微软令牌。玩家无感，启动前续期用。
     ///
-    /// ⚠️ 返回的 `refresh_token` 是**轮换后的新值**（旧的已作废），
-    /// 调用方必须立刻落盘，否则等于把用户踢下线。要跑完整链就用
+    /// ⚠️ 返回的 `refresh_token` 是轮换后的新值（旧的已作废），
+    /// 调用方必须立刻落盘，否则账号会被踢下线。要跑完整链就用
     /// [`Self::refresh_full`]，它自带「先落盘再跑链」的顺序保证。
     pub async fn refresh(&self, refresh_token: &str) -> Result<MsaTokens, AppError> {
         let resp = self
@@ -281,7 +279,7 @@ impl MsaClient {
                 expires_in: raw.expires_in.unwrap_or(3600),
             });
         }
-        // refresh 失效的几种说法（PCL ModLaunch.vb:927-930 的 Relogin 条件）：
+        // refresh 失效的几种说法：
         // must sign in again / password expired / refresh_token is not valid / expired
         let lower = text.to_lowercase();
         let must_relogin = lower.contains("must sign in again")
@@ -306,8 +304,8 @@ impl MsaClient {
     /// 续期 + 跑完整链，且保证「轮换后的 refresh token 先落盘」。
     ///
     /// 顺序是硬性的：拿到新 refresh token 立刻调 `on_rotated`（调用方负责
-    /// 写盘），**然后**才跑 Xbox/XSTS/MC 链。链失败时新 token 已经存好，
-    /// 重试续期不会失效（conic/shard 的 load-bearing step，见 REF 文档 §3）。
+    /// 写盘），然后再跑 Xbox/XSTS/MC 链。链失败时新 token 已经存好，
+    /// 重试续期不会失效，顺序不能反。
     pub async fn refresh_full(
         &self,
         refresh_token: &str,
@@ -484,7 +482,7 @@ impl MsaClient {
                 "Mojang 需要逐个批准第三方启动器的应用，未批准前换不到游戏令牌",
             )
             .with_hint("审核通过后就能正常登录，通常需要几天")),
-            // PCL 把其余 403 当 IP 风控（ModLaunch.vb:1028-1030）
+            // 其余 403 按 IP 风控处理
             403 => Err(AppError::network(
                 "当前 IP 的登录尝试异常",
                 "Mojang 拒绝了这个网络位置的登录请求",
@@ -507,7 +505,7 @@ impl MsaClient {
         }
     }
 
-    /// PCL Step5：验证账号持有 Minecraft（也会刷新 XGP 状态）。
+    /// 验证账号持有 Minecraft（也会刷新 XGP 状态）。
     /// `items` 为空 = 没买游戏或订阅到期。这一步能把「没买游戏」和
     /// 「买了没建角色」（profile 404）分开，缺了它两种情况会混成一种。
     async fn minecraft_entitlements(&self, mc_access_token: &str) -> Result<(), AppError> {
@@ -566,7 +564,7 @@ impl MsaClient {
                 "Mojang 限制了短时间内的登录次数",
             )
             .with_hint("等几分钟后再试")),
-            // 买了游戏但还没在官网创建角色（PCL Step6 404）
+            // 买了游戏但还没在官网创建角色（404）
             404 => Err(AppError::validation(
                 "还没有 Minecraft 角色",
                 "请先创建 Minecraft 玩家档案，然后再重新登录",
@@ -660,7 +658,7 @@ struct XErrResponse {
     code: u64,
 }
 
-/// 一个已经换到的 Xbox 用户票据（token + 用户哈希）。
+/// 一个已经换到的 Xbox 票据（token + 账号哈希）。
 struct XblTicket {
     token: String,
     uhs: String,
@@ -673,7 +671,7 @@ fn parse_oauth_error(body: &str) -> Option<OAuthError> {
 }
 
 /// XErr 可能是 JSON 字段，也可能 body 直接是纯文本带码（代理/网关形态）。
-/// JSON 优先，回落文本包含匹配（PCL 就是纯文本匹配，见 ModLaunch.vb:981）。
+/// JSON 优先，回落文本包含匹配。
 fn parse_xerr(body: &str) -> Option<u64> {
     if let Ok(parsed) = serde_json::from_str::<XErrResponse>(body) {
         return Some(parsed.code);
@@ -690,8 +688,8 @@ fn parse_xerr(body: &str) -> Option<u64> {
     .find(|code| body.contains(&code.to_string()))
 }
 
-/// XSTS 拒绝的固定码表。映射以 PCL 为准（`docs/MSA-RESEARCH-PCL.md` §6）；
-/// 未收录的码带原始码给通用提示，不赌死映射（参考实现之间互相矛盾）。
+/// XSTS 拒绝的固定码表；
+/// 未收录的码带原始码给通用提示，不赌死映射（不同实现说法不一）。
 fn xerr_error(code: u64) -> AppError {
     match code {
         2148916227 => AppError::validation(
@@ -713,7 +711,7 @@ fn xerr_error(code: u64) -> AppError {
             "需要先修改出生日期或由家庭组的大人放行，然后才能登录",
         )
         .with_hint("把出生日期改成 18 岁以上，等一分钟再回来登录"),
-        // 2148916236/37 等：参考实现说法不一（成年验证/地区），不赌死映射
+        // 2148916236/37 等：说法不一（成年验证/地区），不赌死映射
         _ => AppError::network(
             "Xbox 登录被拒绝",
             format!("Xbox 服务返回了错误码 {code}"),
@@ -722,7 +720,7 @@ fn xerr_error(code: u64) -> AppError {
     }
 }
 
-/// token 端点的错误体翻译。先认几个微软专用的说法（PCL MyMsgLogin 的清单），
+/// token 端点的错误体翻译。先认几个微软专用的说法，
 /// 其余走 OAuth error 字段。
 fn token_error_body(body: &str, status: u16) -> AppError {
     if body.contains("AADSTS70000") {
@@ -829,7 +827,7 @@ mod tests {
             parse_xerr(r#"{"XErr":2148916233,"Message":""}"#),
             Some(2148916233)
         );
-        // 纯文本形态（PCL 的匹配方式）
+        // 纯文本形态
         assert_eq!(
             parse_xerr("error 2148916238: child account"),
             Some(2148916238)
@@ -839,13 +837,13 @@ mod tests {
 
     #[test]
     fn xerr_mapping_follows_pcl() {
-        // PCL 收录的四个码必须有指路话术；未收录的不赌死映射、带原始码
+        // 收录的四个码必须有指路话术；未收录的不赌死映射、带原始码
         for code in [2148916227u64, 2148916233, 2148916235, 2148916238] {
             let err = xerr_error(code);
             let text = format!("{err:?}");
             assert!(!text.contains(&code.to_string()), "{code} 没翻译");
         }
-        // 2148916236/37 参考实现互相矛盾 → 通用提示 + 原始码
+        // 2148916236/37 说法不一 → 通用提示 + 原始码
         for code in [2148916236u64, 2148916237, 999] {
             let err = xerr_error(code);
             let text = format!("{err:?}");

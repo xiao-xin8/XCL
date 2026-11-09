@@ -226,7 +226,7 @@ impl AppState {
 
         tokio::spawn(async move {
             run_task(
-                state, task_id, items, fetcher, progress, options, cancel, emit,
+                state, task_id, items, fetcher, progress, options, cancel, emit, None,
             )
             .await;
         });

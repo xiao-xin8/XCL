@@ -1,10 +1,15 @@
-import { useEffect, useState } from "react";
-import { Box, Button, Chip, Paper, Stack, Typography, alpha } from "@mui/material";
+import { useEffect, useState, type ElementType } from "react";
+import { Box, Button, ButtonBase, Chip, Paper, Stack, Typography, alpha } from "@mui/material";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import BlockOutlined from "@mui/icons-material/BlockOutlined";
+import BugReportOutlined from "@mui/icons-material/BugReportOutlined";
 import DownloadOutlined from "@mui/icons-material/DownloadOutlined";
+import GitHub from "@mui/icons-material/GitHub";
+import LanguageOutlined from "@mui/icons-material/LanguageOutlined";
 import LayersOutlined from "@mui/icons-material/LayersOutlined";
 import LocalOfferOutlined from "@mui/icons-material/LocalOfferOutlined";
+import OpenInNewOutlined from "@mui/icons-material/OpenInNewOutlined";
 import ViewInArOutlined from "@mui/icons-material/ViewInArOutlined";
 import { useUpdateActions, useUpdateState } from "../../lib/updateContext";
 import ChangelogDialog from "../ChangelogDialog";
@@ -92,6 +97,27 @@ const H2_SX = {
   fontWeight: 800,
   letterSpacing: -0.2,
 } as const;
+
+const LINKS: { Icon: ElementType; title: string; desc: string; url: string }[] = [
+  {
+    Icon: LanguageOutlined,
+    title: "官网",
+    desc: "下载、更新日志与版本信息",
+    url: "https://xcl.xiaoxinhub.com",
+  },
+  {
+    Icon: GitHub,
+    title: "GitHub",
+    desc: "源码、提交记录和开源协议",
+    url: "https://github.com/xiao-xin8/XCL",
+  },
+  {
+    Icon: BugReportOutlined,
+    title: "问题反馈",
+    desc: "遇到 bug 或有建议，去 Issues 提一条",
+    url: "https://github.com/xiao-xin8/XCL/issues/new",
+  },
+];
 
 export default function AboutSection() {
   const [info, setInfo] = useState<AppInfo | null>(null);
@@ -344,6 +370,21 @@ export default function AboutSection() {
         </Box>
       </Paper>
 
+      <Paper variant="outlined" sx={{ borderRadius: 1, overflow: "hidden" }}>
+        <Box sx={{ px: 3, pt: 2.5, pb: 1 }}>
+          <Typography sx={EYEBROW_SX}>链接</Typography>
+          <Typography sx={H2_SX}>找到 XCL</Typography>
+          <Typography sx={{ fontSize: 12, color: "text.secondary", lineHeight: 1.75, mt: 0.75 }}>
+            官网、源码和问题反馈都在这里。
+          </Typography>
+        </Box>
+        <Box sx={{ "& > * + *": { borderTop: "1px solid", borderColor: "divider" } }}>
+          {LINKS.map((item) => (
+            <LinkRow key={item.title} {...item} />
+          ))}
+        </Box>
+      </Paper>
+
       <Box
         sx={{
           display: "flex",
@@ -365,5 +406,50 @@ export default function AboutSection() {
 
       <ChangelogDialog open={logOpen} onClose={() => setLogOpen(false)} />
     </Box>
+  );
+}
+
+function LinkRow(props: { Icon: ElementType; title: string; desc: string; url: string }) {
+  const { Icon, title, desc, url } = props;
+
+  return (
+    <ButtonBase
+      onClick={() => void openUrl(url).catch(() => undefined)}
+      sx={{
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        gap: 1.5,
+        px: 3,
+        py: 1.5,
+        textAlign: "left",
+        "&:hover": { bgcolor: "action.hover" },
+      }}
+    >
+      <Box
+        sx={{
+          width: 30,
+          height: 30,
+          flexShrink: 0,
+          borderRadius: 1,
+          display: "grid",
+          placeItems: "center",
+          bgcolor: (t) => alpha(t.palette.primary.main, 0.16),
+          color: "brand.ink",
+        }}
+      >
+        <Icon sx={{ fontSize: 17 }} />
+      </Box>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography sx={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.6 }}>
+          {title}
+        </Typography>
+        <Typography sx={{ fontSize: 11, color: "text.secondary", lineHeight: 1.65 }}>
+          {desc}
+        </Typography>
+      </Box>
+      <OpenInNewOutlined sx={{ fontSize: 14, color: "text.secondary", flexShrink: 0 }} />
+    </ButtonBase>
   );
 }

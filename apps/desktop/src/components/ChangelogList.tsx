@@ -10,7 +10,7 @@ import Loading from "./Loading";
  * 更新日志列表：设置页的卡片和关于页的弹窗共用这一份。
  *
  * `active` 变真时才请求；后端在本次进程里缓存，所以反复收起/展开不会重复联网。
- * 失败不自动重试 —— 由用户点「重试」，避免网络差时来回打请求。
+ * 失败不自动重试 —— 等界面上点「重试」，避免网络差时来回打请求。
  */
 export default function ChangelogList(props: { active: boolean }) {
   const { active } = props;

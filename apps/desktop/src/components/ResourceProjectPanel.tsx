@@ -43,9 +43,11 @@ export default function ResourceProjectPanel(props: {
   loading: boolean;
   error: AppError | null;
   onRetry: () => void;
+  /** 详情页里直接展开；资源搜索页保持默认折叠 */
+  defaultOpen?: boolean;
 }) {
-  const { item, project, loading, error, onRetry } = props;
-  const [open, setOpen] = useState(false);
+  const { item, project, loading, error, onRetry, defaultOpen = false } = props;
+  const [open, setOpen] = useState(defaultOpen);
 
   const description = project?.description || item.description;
   const downloads = project?.downloads ?? item.downloads;

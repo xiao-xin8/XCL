@@ -1,19 +1,19 @@
 //! 界面内核（WebView2）的浏览器缓存。
 //!
 //! 界面是 Tauri 内嵌的 WebView2 画的，它自己的浏览缓存（`Cache` / `Code Cache` /
-//! `GPUCache` 等）默认落在 `%LOCALAPPDATA%\<identifier>\EBWebView` —— **不在我们的
-//! `cache_root` 里**。所以过去它既统计不到也清不掉，实测能涨到 600 MB 以上，
+//! `GPUCache` 等）默认落在 `%LOCALAPPDATA%\<identifier>\EBWebView` —— 不在我们的
+//! `cache_root` 里。所以过去它既统计不到也清不掉，实测能涨到 600 MB 以上，
 //! 而安装包本身才 25 MB。
 //!
-//! 唯一的难点：**界面运行时这些文件正被 WebView2 用着**。
+//! 唯一的难点：界面运行时这些文件正被 WebView2 用着。
 //! 哪怕 Windows 允许删（有些句柄带 FILE_SHARE_DELETE），内核随后再去读缓存 /
 //! V8 代码缓存也可能直接把渲染进程带崩 —— 实测 dev 模式下会崩，而 debug 和 release
 //! 用的是同一个 WebView2 Runtime、同一套文件，只是 dev 缓存命中更密、更容易撞上，
-//! 所以**不能赌正式版安全**。
+//! 所以不能赌正式版安全。
 //!
 //! 策略因此是「一个字节都不在运行时删」：点清理只写个标记，然后由前端自动重启应用；
 //! `purge_on_boot()` 在下一次进程刚起来、WebView2 还没创建时把缓存真正删掉。
-//! 万一重启没成功（用户强杀、崩溃），标记还在，再下次启动照样清 —— 不会漏。
+//! 万一重启没成功（强杀、崩溃），标记还在，再下次启动照样清 —— 不会漏。
 //!
 //! 只清「纯缓存」子目录。`Extensions` / `Local Storage` 留着：
 //! 删了会丢主题偏好、"提示已读"之类的界面状态，省那 28 MB 不划算。
@@ -32,7 +32,7 @@ const PENDING_MARKER: &str = ".cache-clean-pending";
 
 /// 允许清理的纯缓存子目录（相对 `EBWebView`）。
 ///
-/// 这些删掉只是下次重新生成，不会丢任何用户数据。Chromium 的缓存目录名比较固定，
+/// 这些删掉只是下次重新生成，不会丢任何本地数据。Chromium 的缓存目录名比较固定，
 /// 多写几个是防不同内核版本换路径，不存在就跳过。
 const CACHE_SUBDIRS: &[&str] = &[
     "Default/Cache",
@@ -83,7 +83,7 @@ pub fn size() -> u64 {
     cache_paths(&root).map(|path| dir_size(&path)).sum()
 }
 
-/// 递归清空目录内容，但**保留目录本身**（内核会自己重建）。
+/// 递归清空目录内容，但保留目录本身（内核会自己重建）。
 ///
 /// 返回「删掉了多少字节」和「是否有文件因为被占用而没删掉」。
 /// 单个文件失败不算错误 —— 运行中必然有文件被锁，这里的目标是尽力而为。
@@ -117,7 +117,7 @@ fn remove_contents(dir: &Path) -> (u64, bool) {
     (freed, blocked)
 }
 
-/// 登记一次清理请求：**不删任何文件**，只写标记。
+/// 登记一次清理请求：不删任何文件，只写标记。
 ///
 /// 真正动手在 `purge_on_boot()`。运行时删 WebView2 正在用的缓存会把界面搞崩，
 /// 详见模块头注释。调用方拿到 `pending = true` 后应当重启应用。
@@ -142,7 +142,7 @@ pub fn schedule_clean() -> CleanOutcome {
     }
 }
 
-/// 启动时清掉上次登记的清理请求。**必须在创建窗口之前调用**（`main.rs` 里）。
+/// 启动时清掉上次登记的清理请求。必须在创建窗口之前调用（`main.rs` 里）。
 ///
 /// 如果个别文件仍被上一轮残留的进程占着（重启太快），就保留标记，
 /// 下次启动再试 —— 不能清完无条件删标记，否则那部分永远清不掉了。
@@ -163,7 +163,7 @@ pub fn purge_on_boot() -> CleanOutcome {
     let mut total_freed = 0;
     let mut still_blocked = true;
     // `AppHandle::restart()` 是「spawn 新进程 → 立刻 exit(0)」，旧进程的 WebView2
-    // 子进程可能还没退干净、缓存仍被占着。给三轮机会，别让用户白重启一次。
+    // 子进程可能还没退干净、缓存仍被占着。给三轮机会，别白重启一次。
     // 只有标记存在时才走到这里，正常启动零开销。
     for attempt in 0..3 {
         let mut blocked = false;

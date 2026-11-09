@@ -20,6 +20,7 @@ use xcl_service::java_runtime::JavaComponent as JavaRuntimeComponent;
 use xcl_service::launch::{LaunchEvent, LaunchStatus};
 use xcl_service::loader::{LoaderListView, LoaderRef};
 use xcl_service::memory::{MemoryStats, TrimReport};
+use xcl_service::content::{ContentKind, ContentListView, ContentToggleView};
 use xcl_service::storage::UnusedReport;
 use xcl_service::resources::{
     InstallTargetView, LocalTargetView, ModItemView, ModSearchView, ResourceDependencyView,
@@ -307,7 +308,7 @@ pub fn restart_app(
     // ⚠️ 不能省。AppHandle::restart() 是 spawn + std::process::exit(0)，
     // 跳过了 RunEvent::Exit；单实例插件的 named mutex 平时就靠那个事件释放。
     // 不手动 destroy，新进程会被当成「已经有一个在跑」而直接退出 ——
-    // 用户看到的就是「点完清理，软件关了，再也没起来」。
+    // 表现就是「点完清理，软件关了，再也没起来」。
     tauri_plugin_single_instance::destroy(&app);
     app.restart();
 }
@@ -768,6 +769,116 @@ pub fn version_open_folder(
     folder: xcl_service::folders::VersionFolder,
 ) -> Result<(), AppError> {
     state.open_version_folder(&version_id, folder)
+}
+
+/// 当前版本的本地内容列表（Mod / 资源包 / 光影 / 材质包）。只读扫描，不联网。
+#[tauri::command]
+pub async fn content_list(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    kind: ContentKind,
+) -> Result<ContentListView, AppError> {
+    let label = kind.label();
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || state.list_contents(&version_id, kind))
+        .await
+        .map_err(|err| {
+            AppError::new(
+                xcl_core::ErrorCode::Unknown,
+                format!("扫描{label}失败"),
+                err.to_string(),
+            )
+        })?
+}
+
+/// 启用 / 禁用：只改文件名后缀，不动内容。
+#[tauri::command]
+pub async fn content_toggle(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    kind: ContentKind,
+    file_name: String,
+) -> Result<ContentToggleView, AppError> {
+    let label = kind.label();
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        state.toggle_content(&version_id, kind, &file_name)
+    })
+    .await
+    .map_err(|err| {
+        AppError::new(
+            xcl_core::ErrorCode::Unknown,
+            format!("切换{label}状态失败"),
+            err.to_string(),
+        )
+    })?
+}
+
+/// 删除：移到版本目录的 `XCL/trash/<类型>/`，可恢复。
+#[tauri::command]
+pub async fn content_delete(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    kind: ContentKind,
+    file_name: String,
+) -> Result<ContentListView, AppError> {
+    let label = kind.label();
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        state.delete_content(&version_id, kind, &file_name)
+    })
+    .await
+    .map_err(|err| {
+        AppError::new(
+            xcl_core::ErrorCode::Unknown,
+            format!("删除{label}失败"),
+            err.to_string(),
+        )
+    })?
+}
+
+/// 从本地文件安装一条内容。取消返回 `None`。
+#[tauri::command]
+pub async fn content_install_local(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    kind: ContentKind,
+) -> Result<Option<ContentListView>, AppError> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let label = kind.label();
+    let dialog = app
+        .dialog()
+        .file()
+        .add_filter(label, kind.extensions());
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file())
+        .await
+        .map_err(|err| {
+            AppError::new(
+                xcl_core::ErrorCode::Unknown,
+                "打开文件选择器失败",
+                err.to_string(),
+            )
+        })?;
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+
+    let state = Arc::clone(state.inner());
+    let source = std::path::PathBuf::from(path.to_string());
+    tauri::async_runtime::spawn_blocking(move || {
+        state.install_content_file(&version_id, kind, &source)
+    })
+    .await
+    .map_err(|err| {
+        AppError::new(
+            xcl_core::ErrorCode::Unknown,
+            format!("安装{label}失败"),
+            err.to_string(),
+        )
+    })?
+    .map(Some)
 }
 
 /// 本机可用的 Java 列表。设置页展示 + 排错用。

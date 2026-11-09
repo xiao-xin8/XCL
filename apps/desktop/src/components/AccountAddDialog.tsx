@@ -28,7 +28,7 @@ import PillTabs from "./PillTabs";
 import Reveal from "./settings/Reveal";
 import ErrorState from "./ErrorState";
 
-/** 顶部三个档位。微软没配 client id 先垫底（用户定的顺序），配好后再提前。 */
+/** 顶部三个档位。微软没配 client id 时排在最后，配好后再提前。 */
 type AddTab = "msa" | "offline" | "authlib";
 
 const TABS = [
@@ -54,7 +54,7 @@ const DIALOG_MAX = "sm";
  * 全部来自后端，前端只收集输入、渲染结果。
  *
  * 换档不做「掉落入场」——三份内容各包一层 `Reveal`，旧档收、新档放，
- * **弹窗高度跟着内容平滑生长**（和登录弹窗切「登录/注册」同一套）。
+ * 弹窗高度跟着内容平滑生长（和登录弹窗切「登录/注册」同一套）。
  * 收起的档位把控件禁用掉，防止 Tab 键聚焦到看不见的输入框。
  *
  * 微软档是设备代码流：点开始 → 后端取设备码 → 展示验证码并自动开浏览器 /
@@ -109,7 +109,7 @@ function MsaTab(props: { active: boolean; onDone: () => void | Promise<void> }) 
   const [error, setError] = useState<AppError | null>(null);
   const [copied, setCopied] = useState(false);
 
-  /** begin 是异步的，期间用户可能切走 —— 用 ref 兜住「回来前别进等待态」 */
+  /** begin 是异步的，期间可能切走 —— 用 ref 兜住「回来前别进等待态」 */
   const activeRef = useRef(active);
   activeRef.current = active;
 
@@ -135,7 +135,7 @@ function MsaTab(props: { active: boolean; onDone: () => void | Promise<void> }) 
       if (!activeRef.current) return;
       setCode(start);
       setPhase("waiting");
-      // PCL 同款：拿到验证码就自动开浏览器 + 自动复制，少两步手工
+      // 拿到验证码就自动开浏览器 + 自动复制，少两步手工
       void openUrl(start.verificationUri).catch(() => undefined);
       void navigator.clipboard.writeText(start.userCode).catch(() => undefined);
       setCopied(true);

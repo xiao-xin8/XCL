@@ -88,8 +88,8 @@ struct TexturesDoc {
 
 #[derive(Debug, Deserialize, Default)]
 struct TexturesSet {
-    /// 协议里是大写 `SKIN` / `CAPE`（有个别实现是先把整个 JSON 转小写再查的，
-    /// 见 `ModMinecraft.vb:1440`）；`alias` 同时兼容大写与小写。
+    /// 协议里是大写 `SKIN` / `CAPE`（个别实现会先把整个 JSON 转小写再查）；
+    /// `alias` 同时兼容大写与小写。
     #[serde(default, alias = "SKIN")]
     skin: Option<TextureEntry>,
     #[serde(default, alias = "CAPE")]
@@ -456,9 +456,9 @@ impl AppState {
         if account.kind == xcl_auth::AccountKind::Offline {
             return default_render(Some(&account.uuid), account.skin_model);
         }
-        // 皮肤档案端点按账号类型分流（PCL `ModMinecraft.vb:1405` 同款思路）：
+        // 皮肤档案端点按账号类型分流：
         // - 第三方：自己服务器的 sessionserver（`{根}/sessionserver/session/…`）
-        // - 微软正版：Mojang 官方 sessionserver（路径**没有** /sessionserver 前缀）
+        // - 微软正版：Mojang 官方 sessionserver（路径没有 /sessionserver 前缀）
         let profile_url = match account.kind {
             xcl_auth::AccountKind::Authlib => account.server_url.as_ref().map(|s| {
                 format!(

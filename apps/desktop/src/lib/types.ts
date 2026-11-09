@@ -420,6 +420,63 @@ export type LocalVersion = {
   icon?: string | null;
 };
 
+// ---------- 本地内容（对应 xcl-service::content） ----------
+
+/** 一个版本里可以管理的本地内容类型。 */
+export type ContentKind = "mod" | "resourcepack" | "shader" | "texturepack";
+
+/** 启动器安装时记下的来源；外部拷入的内容没有。 */
+export type ContentOriginView = {
+  source: "modrinth" | "curseforge";
+  projectId: string;
+  fileId: string;
+};
+
+export type LocalContentView = {
+  /** 真实文件名，启停 / 删除都靠它定位 */
+  fileName: string;
+  name: string;
+  /** Mod 的元数据 ID；资源包 / 光影为 null */
+  contentId: string | null;
+  /** Mod 的版本号；资源包类内容为 null */
+  version: string | null;
+  /** 资源包 / 材质包 / 光影的格式版本，读不到为 null */
+  packFormat: number | null;
+  authors: string[];
+  description: string | null;
+  /** `data:image/...;base64,...`；包内没有图标时为 null */
+  icon: string | null;
+  enabled: boolean;
+  size: number;
+  /** 同一目录里有多个相同 Mod ID；其它类型恒为 false */
+  duplicate: boolean;
+  /** 由启动器安装时才有 */
+  origin: ContentOriginView | null;
+};
+
+export type ContentListView = {
+  versionId: string;
+  /** 实际扫描的目录。非隔离版本指向共享根目录 */
+  gameDir: string;
+  isolated: boolean;
+  /** 这个版本正在准备 / 运行，运行时不允许改文件 */
+  running: boolean;
+  items: LocalContentView[];
+  enabledCount: number;
+  disabledCount: number;
+  duplicateCount: number;
+  /** 目录里还剩几个子文件夹（首版不管理文件夹形式的包） */
+  folderCount: number;
+};
+
+/** 启停单条内容的结果：只回变化的一条，前端原地替换，不整表刷新。 */
+export type ContentToggleView = {
+  item: LocalContentView;
+  enabledCount: number;
+  disabledCount: number;
+  duplicateCount: number;
+};
+
 // ---------- 版本隔离（对应 xcl-service::isolation） ----------
 
 export type IsolationSource = "user" | "auto" | "policy";

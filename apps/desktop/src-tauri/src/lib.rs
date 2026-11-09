@@ -238,6 +238,10 @@ pub fn run() {
             commands::update_download,
             commands::update_cancel,
             commands::update_apply,
+            commands::content_list,
+            commands::content_toggle,
+            commands::content_delete,
+            commands::content_install_local,
             commands::ping
         ])
         .build(tauri::generate_context!())

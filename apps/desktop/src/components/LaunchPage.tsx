@@ -38,17 +38,20 @@ import {
   toAppError,
   type AccountView,
   type AppConfig,
+  type ContentKind,
   type IsolationView,
   type JavaComponent,
   type LocalVersion,
   type VersionStats,
 } from "../lib/types";
 import { invalidate } from "../lib/api";
+import { contentConfig, isContentKind } from "../lib/contentKinds";
 import { formatBytes, formatRelativeTime } from "../lib/format";
 import { foldersFor, type VersionFolderKey } from "../lib/versionFolders";
 import { TaskProgress } from "./DownloadTask";
 import VersionIcon from "./VersionIcon";
 import AccountPage from "./AccountPage";
+import ContentManagerPage from "./version-managers/ContentManagerPage";
 import LoginSidebar from "./LoginSidebar";
 import LogDialog from "./LogDialog";
 import Splitter from "./Splitter";
@@ -118,10 +121,12 @@ export default function LaunchPage() {
   const [accounts, setAccounts] = useState<AccountView[]>([]);
   const account = useMemo(() => accounts.find((a) => a.active) ?? null, [accounts]);
   /**
-   * 当前在哪个页面：`null` = 启动页主界面，其余两个 = 整页子页。
+   * 当前在哪个页面：`null` = 启动页主界面，其余 = 整页子页。
    * 不再用 85% 弹窗（`Dialog`），改成标题栏下铺满的页面，返回键交给标题栏。
    */
-  const [subPage, setSubPage] = useState<"accounts" | "settings" | null>(null);
+  const [subPage, setSubPage] = useState<
+    "accounts" | "settings" | ContentKind | null
+  >(null);
   const [logOpen, setLogOpen] = useState(false);
   /** 删除版本的二次确认 */
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -197,7 +202,7 @@ export default function LaunchPage() {
 
   /** 进整页子页前先记住列表位置（退场 110ms 后旧节点就卸了） */
   const openSubPage = useCallback(
-    (page: "accounts" | "settings") => {
+    (page: "accounts" | "settings" | ContentKind) => {
       saveVersionsScroll();
       setSubPage(page);
     },
@@ -348,7 +353,9 @@ export default function LaunchPage() {
       ? "账号管理"
       : subPage === "settings" && current
         ? `版本设置 · ${current.id}`
-        : null,
+        : subPage && current && isContentKind(subPage)
+          ? `${contentConfig(subPage).title} · ${current.id}`
+          : null,
     () => setSubPage(null),
   );
 
@@ -896,7 +903,7 @@ export default function LaunchPage() {
                 </Stack>
               </Box>
 
-              {/* 底部：每个文件夹一个入口 */}
+              {/* 底部：文件夹 / 版本管理器入口 */}
               <Box
                 sx={{
                   flexShrink: 0,
@@ -912,30 +919,35 @@ export default function LaunchPage() {
                   gridAutoColumns: "minmax(0, 1fr)",
                 }}
               >
-                {foldersFor(current, isolation?.enabled === true).map(({ key, label, icon: Icon }) => (
-                  <Button
-                    key={key}
-                    size="small"
-                    variant="outlined"
-                    startIcon={<Icon sx={{ fontSize: 16 }} />}
-                    disabled={!current.valid && key !== "version"}
-                    onClick={() => void openFolder(key)}
-                    sx={{
-                      fontSize: 13,
-                      fontWeight: 500,
-                      minHeight: 38,
-                      minWidth: 0,
-                      py: 0.75,
-                      px: 0.5,
-                      justifyContent: "center",
-                      // 一排挤下五个时标签不许换行，宁可让容器裁掉
-                      whiteSpace: "nowrap",
-                      "& .MuiButton-startIcon": { mr: 0.5 },
-                    }}
-                  >
-                    {label}
-                  </Button>
-                ))}
+                {foldersFor(current, isolation?.enabled === true).map(
+                  ({ key, label, icon: Icon, page }) => (
+                    <Button
+                      key={key}
+                      size="small"
+                      variant="outlined"
+                      startIcon={<Icon sx={{ fontSize: 16 }} />}
+                      disabled={!current.valid && key !== "version"}
+                      onClick={() => {
+                        if (page) openSubPage(page);
+                        else void openFolder(key);
+                      }}
+                      sx={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        minHeight: 38,
+                        minWidth: 0,
+                        py: 0.75,
+                        px: 0.5,
+                        justifyContent: "center",
+                        // 一排挤下五个时标签不许换行，宁可让容器裁掉
+                        whiteSpace: "nowrap",
+                        "& .MuiButton-startIcon": { mr: 0.5 },
+                      }}
+                    >
+                      {label}
+                    </Button>
+                  ),
+                )}
               </Box>
             </Paper>
           )}
@@ -946,7 +958,7 @@ export default function LaunchPage() {
 
   return (
     <>
-      {/* 整页子页：主界面 / 账号管理 / 版本设置。
+      {/* 整页子页：主界面 / 账号管理 / 版本设置 / 内容管理。
           切换走内层 PageTransition（initial={false}，避免和外层页面动画叠加），
           标题栏的「← 返回 + 标题」由 useRegisterNestedPage 接管。 */}
       <PageTransition
@@ -965,6 +977,9 @@ export default function LaunchPage() {
                 onIsolationChanged={setIsolation}
               />
             );
+          }
+          if (isContentKind(key) && current) {
+            return <ContentManagerPage versionId={current.id} kind={key} />;
           }
           return main;
         }}

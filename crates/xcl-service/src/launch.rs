@@ -172,6 +172,20 @@ impl LaunchSessions {
         running || launching
     }
 
+    /// 指定版本是不是正在准备或运行。
+    ///
+    /// Mod 文件在游戏运行期间会被锁住，写操作前必须问这一句；
+    /// 准备阶段也算，避免「刚点启动就去改 mods」。
+    pub fn active_for(&self, version_id: &str) -> bool {
+        if self.running_for(version_id).is_some() {
+            return true;
+        }
+        self.launching
+            .lock()
+            .map(|set| set.contains(version_id))
+            .unwrap_or(false)
+    }
+
     /// 抢占「正在准备启动」的占位。已经有同版本在准备时返回 `None`。
     fn begin_launch(&self, version_id: &str) -> Option<LaunchReservation> {
         let mut set = self

@@ -25,6 +25,7 @@ pub enum VersionFolder {
     Mods,
     Logs,
     Resourcepacks,
+    Shaderpacks,
     /// 1.5 及更早的材质包目录
     Texturepacks,
 }
@@ -37,6 +38,7 @@ impl VersionFolder {
             Self::Mods => Some("mods"),
             Self::Logs => Some("logs"),
             Self::Resourcepacks => Some("resourcepacks"),
+            Self::Shaderpacks => Some("shaderpacks"),
             Self::Texturepacks => Some("texturepacks"),
         }
     }
@@ -218,6 +220,7 @@ mod tests {
             ("mods", VersionFolder::Mods),
             ("logs", VersionFolder::Logs),
             ("resourcepacks", VersionFolder::Resourcepacks),
+            ("shaderpacks", VersionFolder::Shaderpacks),
             ("texturepacks", VersionFolder::Texturepacks),
         ] {
             let parsed: VersionFolder = serde_json::from_str(&format!("\"{key}\"")).unwrap();

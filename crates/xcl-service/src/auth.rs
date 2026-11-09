@@ -26,11 +26,11 @@ use xcl_net::RaceWinner;
 
 use crate::AppState;
 
-/// MC 令牌过期时间提前 1 小时记账（PCL `ModLaunch.vb:1045` 同款）：
+/// MC 令牌过期时间提前 1 小时记账：
 /// 到点就主动续期，续期失败的 1 小时宽限里旧令牌其实还能用。
 const MSA_EXPIRY_MARGIN_SECS: i64 = 3600;
-/// 设备码轮询连续传输失败的容忍次数（PCL `MyMsgLogin.xaml.vb:148` 同款：
-/// 玩家正在浏览器里输码，一次网络抖动不该把登录搞死）。
+/// 设备码轮询连续传输失败的容忍次数：玩家正在浏览器里输码，
+/// 一次网络抖动不该把登录搞死。
 const MSA_POLL_MAX_FAILURES: u32 = 3;
 
 /// authlib-injector 官方 artifact 清单：版本 / 下载地址 / SHA-256。
@@ -234,7 +234,7 @@ impl MsaPendingLogin {
         self.next_poll_ms = now_ms + self.interval_ms;
     }
 
-    /// slow_down：间隔**永久** +5 秒（RFC 8628 §3.5，conic 同款）。
+    /// slow_down：间隔永久 +5 秒（RFC 8628 §3.5）。
     fn note_slow_down(&mut self, now_ms: i64) {
         self.consecutive_failures = 0;
         self.interval_ms += 5_000;
@@ -637,8 +637,8 @@ impl AppState {
     /// 续期一个微软账号。`force = true` 时不看记账过期时间（手动刷新）。
     ///
     /// 顺序是硬性的（`xcl_auth::msa::refresh_full` 的契约）：轮换后的
-    /// refresh token **先落盘**，再跑 Xbox 链 —— 微软的 refresh token
-    /// 用一次旧的就作废，链中途失败也不能把新的丢掉（丢了 = 用户被踢下线）。
+    /// refresh token 先落盘，再跑 Xbox 链 —— 微软的 refresh token
+    /// 用一次旧的就作废，链中途失败也不能把新的丢掉（丢了 = 账号会被踢下线）。
     async fn renew_msa(&self, account: &Account, force: bool) -> Result<AccountView, AppError> {
         // 并发保护：启动前自动续期与手动「刷新登录」可能撞车
         let _guard = self.msa_refresh_lock.lock().await;
@@ -657,7 +657,7 @@ impl AppState {
             .with_hint("删掉它重新登录一次"));
         };
         if !force && xcl_auth::now_ms() < creds.mc_expires_ms {
-            // 快路径：还没到提前量（PCL「无需登录」同语义）
+            // 快路径：还没到提前量（无需登录）
             return Ok(view(&fresh, self.lock_accounts().active_id.as_deref()));
         }
 
@@ -775,10 +775,10 @@ impl AppState {
     }
 
     /// 启动前的微软会话保证。原则与第三方账号同源（见 `ensure_authlib_session`）：
-    /// **网络不通不拦启动** —— 记账过期时间提前了 1 小时，「记账过期」时
+    /// 网络不通不拦启动 —— 记账过期时间提前了 1 小时，「记账过期」时
     /// 旧令牌往往还能再用一小时，宁可带旧凭据让游戏自己报错，也别因为一次
     /// 抖动把人挡在门外。只有服务端明确说「登录态不认了」（invalid_grant）
-    /// 才要求重新登录；网络失败时仅当**硬过期**（记账 + 1 小时）才拦。
+    /// 才要求重新登录；网络失败时仅当硬过期（记账 + 1 小时）才拦。
     pub(crate) async fn ensure_microsoft_session(&self) -> Result<(), AppError> {
         let account = {
             let store = self.lock_accounts();
@@ -1444,7 +1444,7 @@ mod tests {
 
     #[test]
     fn msa_expiry_margin_matches_pcl() {
-        // PCL：expires_in + now − 3600（提前 1 小时视作过期）
+        // expires_in + now − 3600（提前 1 小时视作过期）
         let before = xcl_auth::now_ms();
         let at = mc_expires_at(86_400);
         let after = xcl_auth::now_ms();

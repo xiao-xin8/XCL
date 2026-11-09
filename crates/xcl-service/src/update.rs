@@ -438,10 +438,9 @@ impl AppState {
         }
 
         let config = self.config();
-        // 地址来自 `config.toml` 的 `update.manifestUrl`：部署信息不进代码。
-        // 空着说明这个构建没有更新服务（自己编译的、别人的 fork），
-        // 地址是内置的（打包时注入）。空说明这个构建没有更新服务
-        // （自己编译的、别人的 fork）：自动检查安静跳过，手动点才报错。
+        // 地址在构建期由 `bake.toml [update] manifestUrl` 注入。
+        // 空说明这个构建没有更新服务（自己编译的、别人的 fork）：
+        // 自动检查安静跳过，手动点才报错。
         let url = xcl_core::config::UPDATE_MANIFEST_ENDPOINT;
         if url.is_empty() {
             let err = AppError::unsupported("这个版本没有更新服务", "更新地址没有打进这个构建");
