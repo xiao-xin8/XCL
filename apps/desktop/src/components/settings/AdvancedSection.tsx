@@ -11,6 +11,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { formatBytes } from "../../lib/format";
 import { setAppearance } from "../../lib/appearance";
+import { copyText } from "../../lib/clipboard";
 import type { ConfigPatch } from "../../lib/config";
 import { toAppError, type AppConfig, type SystemJava, type TrimReport, type UnusedReport } from "../../lib/types";
 import { useToast } from "../Toast";
@@ -40,28 +41,6 @@ const LOG_OPTIONS = [
   { value: "debug", label: "调试" },
   { value: "trace", label: "详细" },
 ] as const;
-
-/** 复制文本：优先用剪贴板 API，WebView 里失败就退回隐藏 textarea。 */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    try {
-      const area = document.createElement("textarea");
-      area.value = text;
-      area.style.position = "fixed";
-      area.style.opacity = "0";
-      document.body.appendChild(area);
-      area.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(area);
-      return ok;
-    } catch {
-      return false;
-    }
-  }
-}
 
 /**
  * 高级：目录、缓存、诊断、配置导入导出、恢复默认。

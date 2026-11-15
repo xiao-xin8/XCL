@@ -2,8 +2,6 @@
 //!
 //! 包内的路径全部来自别人的文件，一律当不可信输入处理：
 //! 只接受普通路径段，`..`、绝对路径、盘符、反斜杠一律拒绝。
-//! 三个参考实现（conic `target_path`、shard `sanitize_rel_path`、
-//! basalt `sanitize_relative`）在这一点上完全一致。
 
 use std::fs;
 use std::io::{self, Read};
@@ -164,6 +162,9 @@ pub(crate) fn find_entry(
 }
 
 /// 从 zip 里读图标（根 / overrides / client-overrides 下的 `icon.png`）。
+///
+/// 格式按文件头认，不按名字：Modrinth 上不少项目图标其实是 `.webp`，
+/// 只认 PNG 的话这类包的图标会白白丢掉。
 pub(crate) fn read_icon(
     archive: &mut zip::ZipArchive<fs::File>,
     prefixes: &[String],
@@ -178,18 +179,22 @@ pub(crate) fn read_icon(
             if archive.name_for_index(index) != Some(name.as_str()) {
                 continue;
             }
-            let mut entry = archive.by_index(index).ok()?;
+            let Ok(mut entry) = archive.by_index(index) else {
+                continue;
+            };
             if entry.size() > MAX_ICON {
-                return None;
+                continue;
             }
             let mut bytes = Vec::new();
-            std::io::Read::take(&mut entry, MAX_ICON)
+            if std::io::Read::take(&mut entry, MAX_ICON)
                 .read_to_end(&mut bytes)
-                .ok()?;
-            if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+                .is_err()
+            {
+                continue;
+            }
+            if crate::local::image_mime(&bytes).is_some() {
                 return Some(bytes);
             }
-            return None;
         }
     }
     None

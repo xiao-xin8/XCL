@@ -23,7 +23,7 @@ use xcl_core::AppError;
 
 use crate::AppState;
 
-/// 账号服务地址是**构建期注入**的（`bake.toml` → `build.rs`），不是用户配置。
+/// 账号服务地址是构建期注入的（`bake.toml` → `build.rs`），不在用户配置里。
 ///
 /// 启动时 `AppState::init` 把它灌进 [`CONFIGURED_SERVER`]，下面那些
 /// 不接 `AppState` 的小函数才拿得到（它们全是内部工具，传一遍参数纯噪音）。

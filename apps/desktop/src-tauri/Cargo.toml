@@ -27,3 +27,10 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# 启动前检查 / 自动安装 WebView2 运行时（见 src/webview.rs）。
+# 只在 Windows 上编译：其它平台用系统自带的 WebView 实现。
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+reqwest = { workspace = true, features = ["blocking"] }

@@ -844,6 +844,10 @@ fn apply_summary(
     } else if summary.relay_players > 0 {
         // 绕中继 = 链路通但没打穿，看起来还是「在连」
         "正在建立直连…".to_string()
+    } else if summary.nodes == 0 {
+        // 中继节点都没出现在列表里，说明还没连上联机服务器。
+        // 这时候不能对房主说「等待好友加入」—— 好友根本进不来。
+        "正在连接联机服务器…".to_string()
     } else if role == "host" {
         "等待好友加入".to_string()
     } else {

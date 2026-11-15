@@ -21,6 +21,7 @@ use xcl_service::launch::{LaunchEvent, LaunchStatus};
 use xcl_service::loader::{LoaderListView, LoaderRef};
 use xcl_service::memory::{MemoryStats, TrimReport};
 use xcl_service::content::{ContentKind, ContentListView, ContentToggleView};
+use xcl_service::saves::SaveListView;
 use xcl_service::storage::UnusedReport;
 use xcl_service::resources::{
     InstallTargetView, LocalTargetView, ModItemView, ModSearchView, ResourceDependencyView,
@@ -769,6 +770,79 @@ pub fn version_open_folder(
     folder: xcl_service::folders::VersionFolder,
 ) -> Result<(), AppError> {
     state.open_version_folder(&version_id, folder)
+}
+
+/// 当前版本的存档列表。只读扫描 `saves/`，并读每个世界的 `level.dat`。
+#[tauri::command]
+pub async fn save_list(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+) -> Result<SaveListView, AppError> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || state.list_saves(&version_id))
+        .await
+        .map_err(|err| {
+            AppError::new(
+                xcl_core::ErrorCode::Unknown,
+                "扫描存档失败",
+                err.to_string(),
+            )
+        })?
+}
+
+/// 渲染存档地图的一张瓦片（256×256），返回 PNG 的 data URL。
+///
+/// 前端用 `L.TileLayer` 的子类逐张要，Leaflet 负责拼贴、淡入、缩放过渡。
+#[tauri::command]
+pub async fn save_map_tile(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    folder_name: String,
+    zoom: u32,
+    tile_x: i32,
+    tile_z: i32,
+) -> Result<xcl_service::map::MapTile, AppError> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        state.render_save_tile(&version_id, &folder_name, zoom, tile_x, tile_z)
+    })
+    .await
+    .map_err(|err| {
+        AppError::new(
+            xcl_core::ErrorCode::Unknown,
+            "渲染地图失败",
+            err.to_string(),
+        )
+    })?
+}
+
+/// 用系统文件管理器打开某个存档目录。
+#[tauri::command]
+pub fn save_open_folder(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    folder_name: String,
+) -> Result<(), AppError> {
+    state.open_save_folder(&version_id, &folder_name)
+}
+
+/// 删除一个存档：移到版本目录的 `XCL/trash/saves/`，可恢复。
+#[tauri::command]
+pub async fn save_delete(
+    state: State<'_, Arc<AppState>>,
+    version_id: String,
+    folder_name: String,
+) -> Result<SaveListView, AppError> {
+    let state = Arc::clone(state.inner());
+    tauri::async_runtime::spawn_blocking(move || state.delete_save(&version_id, &folder_name))
+        .await
+        .map_err(|err| {
+            AppError::new(
+                xcl_core::ErrorCode::Unknown,
+                "删除存档失败",
+                err.to_string(),
+            )
+        })?
 }
 
 /// 当前版本的本地内容列表（Mod / 资源包 / 光影 / 材质包）。只读扫描，不联网。

@@ -22,5 +22,11 @@ fn main() {
     // 必须早于 `run()`：Tauri 一进 setup 窗口就已经建好，缓存立刻又被锁住。
     let _ = xcl_service::webview_cache::purge_on_boot();
 
+    // 电脑上没装 WebView2 时，Tauri 只会抛一句英文。这里提前查一次，
+    // 缺了就自动下载安装（裸 exe 分发不会走安装包那套 webviewInstallMode）。
+    if !xcl_desktop::webview::ensure() {
+        return;
+    }
+
     xcl_desktop::run()
 }

@@ -38,7 +38,6 @@ import {
   toAppError,
   type AccountView,
   type AppConfig,
-  type ContentKind,
   type IsolationView,
   type JavaComponent,
   type LocalVersion,
@@ -47,11 +46,16 @@ import {
 import { invalidate } from "../lib/api";
 import { contentConfig, isContentKind } from "../lib/contentKinds";
 import { formatBytes, formatRelativeTime } from "../lib/format";
-import { foldersFor, type VersionFolderKey } from "../lib/versionFolders";
+import {
+  foldersFor,
+  type VersionFolderKey,
+  type VersionManagerKey,
+} from "../lib/versionFolders";
 import { TaskProgress } from "./DownloadTask";
 import VersionIcon from "./VersionIcon";
 import AccountPage from "./AccountPage";
 import ContentManagerPage from "./version-managers/ContentManagerPage";
+import SaveManagerPage from "./version-managers/SaveManagerPage";
 import LoginSidebar from "./LoginSidebar";
 import LogDialog from "./LogDialog";
 import Splitter from "./Splitter";
@@ -125,7 +129,7 @@ export default function LaunchPage() {
    * 不再用 85% 弹窗（`Dialog`），改成标题栏下铺满的页面，返回键交给标题栏。
    */
   const [subPage, setSubPage] = useState<
-    "accounts" | "settings" | ContentKind | null
+    "accounts" | "settings" | VersionManagerKey | null
   >(null);
   const [logOpen, setLogOpen] = useState(false);
   /** 删除版本的二次确认 */
@@ -202,7 +206,7 @@ export default function LaunchPage() {
 
   /** 进整页子页前先记住列表位置（退场 110ms 后旧节点就卸了） */
   const openSubPage = useCallback(
-    (page: "accounts" | "settings" | ContentKind) => {
+    (page: "accounts" | "settings" | VersionManagerKey) => {
       saveVersionsScroll();
       setSubPage(page);
     },
@@ -353,9 +357,11 @@ export default function LaunchPage() {
       ? "账号管理"
       : subPage === "settings" && current
         ? `版本设置 · ${current.id}`
-        : subPage && current && isContentKind(subPage)
-          ? `${contentConfig(subPage).title} · ${current.id}`
-          : null,
+        : subPage === "saves" && current
+          ? `存档管理 · ${current.id}`
+          : subPage && current && isContentKind(subPage)
+            ? `${contentConfig(subPage).title} · ${current.id}`
+            : null,
     () => setSubPage(null),
   );
 
@@ -977,6 +983,9 @@ export default function LaunchPage() {
                 onIsolationChanged={setIsolation}
               />
             );
+          }
+          if (key === "saves" && current) {
+            return <SaveManagerPage versionId={current.id} />;
           }
           if (isContentKind(key) && current) {
             return <ContentManagerPage versionId={current.id} kind={key} />;

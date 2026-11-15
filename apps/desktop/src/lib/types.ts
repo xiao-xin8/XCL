@@ -420,6 +420,62 @@ export type LocalVersion = {
   icon?: string | null;
 };
 
+// ---------- 存档（对应 xcl-service::saves） ----------
+
+/**
+ * 列表里的一个世界。
+ *
+ * 存档是目录，所以没有 `enabled` —— 「禁用存档」没有意义，界面上也就不放开关。
+ */
+export type SaveView = {
+  /** 存档目录名；世界名可以被玩家改，目录名才是定位用的那份 */
+  folderName: string;
+  /** `level.dat` 里的世界名，读不到时等于目录名 */
+  name: string;
+  /** 生成这个世界时的游戏版本，如 `1.20.1` */
+  gameVersion: string | null;
+  /** 快照版本生成的世界 */
+  snapshot: boolean;
+  dataVersion: number | null;
+  /** 最后一次游玩；没读过 level.dat 时为 null */
+  lastPlayedMs: number | null;
+  sizeBytes: number;
+  /** `data:image/png;base64,...`，世界没有封面时为 null */
+  icon: string | null;
+  /** i64 超出 JS 安全整数范围，后端按字符串给 */
+  seed: string | null;
+  gameMode: "survival" | "creative" | "adventure" | "spectator" | null;
+  difficulty: "peaceful" | "easy" | "normal" | "hard" | null;
+  hardcore: boolean;
+  cheats: boolean;
+  spawnX: number | null;
+  spawnZ: number | null;
+  /** `level.dat` 缺失或解析失败；照常列出来，只是没有元数据 */
+  broken: boolean;
+};
+
+export type SaveListView = {
+  versionId: string;
+  /** 实际扫描的目录。非隔离版本指向共享根目录 */
+  gameDir: string;
+  isolated: boolean;
+  running: boolean;
+  items: SaveView[];
+  totalBytes: number;
+};
+
+// ---------- 存档地图瓦片（对应 xcl-service::map） ----------
+
+/** 一张 256×256 的地图瓦片。前端拼成可拖动缩放的地图。 */
+export type MapTile = {
+  /** `data:image/png;base64,...`；`empty` 时是空串 */
+  dataUrl: string;
+  /** 这个范围里一个已生成的区块都没有 */
+  empty: boolean;
+  /** 直接来自磁盘缓存 */
+  cached: boolean;
+};
+
 // ---------- 本地内容（对应 xcl-service::content） ----------
 
 /** 一个版本里可以管理的本地内容类型。 */

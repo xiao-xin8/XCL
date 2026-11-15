@@ -24,8 +24,8 @@ export type VersionFolderKey =
   | "texturepacks"
   | "logs";
 
-/** 版本管理器的整页子页 key。 */
-export type VersionManagerKey = ContentKind;
+/** 版本管理器的整页子页 key。存档不是内容类型，单独算一个。 */
+export type VersionManagerKey = ContentKind | "saves";
 
 export type VersionFolderEntry = {
   key: VersionFolderKey;
@@ -38,7 +38,7 @@ export type VersionFolderEntry = {
 export const VERSION_FOLDERS: readonly VersionFolderEntry[] = [
   { key: "version", label: "版本目录", icon: FolderOutlinedIcon },
   { key: "game", label: "游戏目录", icon: FolderOpenOutlinedIcon },
-  { key: "saves", label: "存档", icon: SaveOutlinedIcon },
+  { key: "saves", label: "存档", icon: SaveOutlinedIcon, page: "saves" },
   { key: "mods", label: "模组", icon: ExtensionOutlinedIcon, page: "mod" },
   {
     key: "resourcepacks",

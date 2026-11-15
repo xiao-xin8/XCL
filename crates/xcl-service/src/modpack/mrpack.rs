@@ -61,7 +61,14 @@ struct Env {
 
 /// 解析一个已经打开的 mrpack。
 pub(crate) fn parse(archive: &mut zip::ZipArchive<fs::File>) -> Result<PackManifest, AppError> {
-    let (index, _base) = extract::find_entry(archive, "modrinth.index.json")?
+    // `base` 是清单所在的目录前缀（含结尾 `/`），根目录时为空串。
+    //
+    // 必须留着：包被重新打包过（第三方转载、GitHub release）时，zip 里往往
+    // 多套一层目录，`overrides/` 实际在 `MyPack/overrides/`。拿空 base 去拼，
+    // 一个文件都解不出来，而且不会报错 —— 装完只剩 mod，配置/光影/资源包
+    // 全没了，看起来就是「这整合包怎么不对劲」。
+    // CurseForge 那条分支一直拼了 base，这里以前漏了。
+    let (index, base) = extract::find_entry(archive, "modrinth.index.json")?
         .ok_or_else(|| {
             AppError::unsupported(
                 "这不是 Modrinth 整合包",
@@ -113,8 +120,13 @@ pub(crate) fn parse(archive: &mut zip::ZipArchive<fs::File>) -> Result<PackManif
         });
     }
 
-    let overrides = OVERRIDES.iter().map(|prefix| prefix.to_string()).collect();
-    let icon = extract::read_icon(archive, &OVERRIDES.map(str::to_string));
+    // 前缀拼上 base：根目录的包 base 为空，拼完还是 `overrides/`，行为不变
+    let overrides: Vec<String> = OVERRIDES
+        .iter()
+        .map(|prefix| format!("{base}{prefix}"))
+        .collect();
+    // 图标也按同一批前缀找，不然嵌套包的图标同样会丢
+    let icon = extract::read_icon(archive, &overrides);
 
     let name = if index.name.trim().is_empty() {
         "整合包".to_string()
@@ -193,11 +205,18 @@ mod tests {
     /// 「条目找不着 / JSON 读串了 / 前缀拼错」这类问题。
     fn make_pack(prefix: &str, index: &str) -> std::fs::File {
         use std::io::Write;
+        use std::sync::atomic::{AtomicUsize, Ordering};
         use zip::write::SimpleFileOptions;
 
+        // 每个用例一个独立文件：cargo test 默认并发跑，
+        // 共用文件名会互相覆盖，出现「单跑绿、一起跑红」的假故障
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let seq = NEXT.fetch_add(1, Ordering::Relaxed);
+
         let path = std::env::temp_dir().join(format!(
-            "xcl-mrpack-{}-{}.mrpack",
+            "xcl-mrpack-{}-{}-{}.mrpack",
             std::process::id(),
+            seq,
             prefix.replace('/', "_")
         ));
         let file = std::fs::File::create(&path).unwrap();
@@ -254,5 +273,38 @@ mod tests {
         let pack = super::parse(&mut archive).unwrap();
         assert_eq!(pack.name, "Nested");
         assert!(pack.loader.is_none());
+        // 关键：overrides 前缀必须带上 zip 里那层目录，否则一个文件都解不出来
+        assert!(
+            pack.overrides.iter().any(|prefix| prefix == "pack/overrides/"),
+            "嵌套包的 overrides 前缀丢了：{:?}",
+            pack.overrides
+        );
+    }
+
+    /// 真的解一次：光断言前缀还不够，得确认文件落到实例目录里。
+    #[test]
+    fn extracts_overrides_from_a_nested_pack() {
+        let index = r#"{
+            "formatVersion": 1,
+            "name": "Nested",
+            "files": [],
+            "dependencies": { "minecraft": "1.21.1" }
+        }"#;
+        let file = make_pack("pack/", index);
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        let pack = super::parse(&mut archive).unwrap();
+
+        let dest = std::env::temp_dir().join(format!("xcl-mrpack-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        std::fs::create_dir_all(&dest).unwrap();
+
+        let written = pack.unpack_overrides(&mut archive, &dest).unwrap();
+        assert_eq!(written, 1, "嵌套包的 overrides 应该解出 1 个文件");
+        assert!(
+            dest.join("config").join("a.toml").is_file(),
+            "config/a.toml 没有落到实例目录"
+        );
+
+        let _ = std::fs::remove_dir_all(&dest);
     }
 }

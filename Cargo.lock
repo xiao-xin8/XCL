@@ -544,6 +544,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "conic-worldmap"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0cb6e4afb590428fd8728cf2b39580eaa34e6933c2158038d0c30c707f5c442"
+dependencies = [
+ "flate2",
+ "lz4_flex",
+ "serde_json",
+]
+
+[[package]]
 name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2168,6 +2179,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
+name = "lz4_flex"
+version = "0.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3084,6 +3104,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -4625,6 +4646,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "twox-hash"
+version = "2.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5548,7 +5575,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-auth"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -5561,7 +5588,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-connect"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "xcl-core",
@@ -5569,7 +5596,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "md-5",
  "serde",
@@ -5580,8 +5607,9 @@ dependencies = [
 
 [[package]]
 name = "xcl-desktop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "tauri",
@@ -5592,6 +5620,8 @@ dependencies = [
  "tauri-plugin-window-state",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
+ "winreg",
  "xcl-core",
  "xcl-launch",
  "xcl-service",
@@ -5600,7 +5630,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-download"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
@@ -5616,7 +5646,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-launch"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "thiserror 2.0.21",
  "tokio",
@@ -5629,7 +5659,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-loader"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -5640,7 +5670,7 @@ dependencies = [
 
 [[package]]
 name = "xcl-net"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "futures",
  "reqwest 0.12.28",
@@ -5653,10 +5683,13 @@ dependencies = [
 
 [[package]]
 name = "xcl-service"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
+ "conic-worldmap",
+ "flate2",
  "futures",
+ "png",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -5682,11 +5715,11 @@ dependencies = [
 
 [[package]]
 name = "xcl-source"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "xcl-update"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",

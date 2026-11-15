@@ -6,6 +6,7 @@
 mod commands;
 mod logging;
 mod tray;
+pub mod webview;
 mod window;
 
 // `get_webview_window` / `try_state` 都来自 Manager，必须显式引入
@@ -238,6 +239,10 @@ pub fn run() {
             commands::update_download,
             commands::update_cancel,
             commands::update_apply,
+            commands::save_list,
+            commands::save_map_tile,
+            commands::save_open_folder,
+            commands::save_delete,
             commands::content_list,
             commands::content_toggle,
             commands::content_delete,

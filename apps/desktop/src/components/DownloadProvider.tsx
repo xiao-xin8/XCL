@@ -57,25 +57,38 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
 
   /** 成功后延迟删除的定时器，卸载时要清掉 */
   const reapTimers = useRef<number[]>([]);
+  /** 已经排过清场的任务：同一条 done 反复到达时不要堆出一串定时器 */
+  const reaping = useRef<Set<string>>(new Set());
 
   /** 把任务从队列里摘掉：队列只留「还得管」的东西 */
-  const dismiss = useCallback(async (taskId: string) => {
-    const current = peekTask(taskId);
-    // 还在跑的不删，先取消
-    if (!current || current.phase === "running") return;
-    removeTask(taskId);
-    try {
-      // 后端也忘掉，否则重新挂载 / 重开界面时 `install_tasks` 又把它带回来
-      await invoke<boolean>("install_forget", { taskId });
-    } catch {
-      /* 纯浏览器环境没有这个命令，忽略 */
-    }
-  }, []);
+  const dismiss = useCallback(
+    async (taskId: string) => {
+      const current = peekTask(taskId);
+      // 已经不在队列里了：没什么可做的
+      if (!current) return;
+      // 还在跑的不删 —— 但必须说一声，否则就是「点了没反应」
+      if (current.phase === "running") {
+        toast("正在下载中，先取消再删除", "info");
+        return;
+      }
+      removeTask(taskId);
+      try {
+        // 后端也忘掉，否则重新挂载 / 重开界面时 `install_tasks` 又把它带回来
+        await invoke<boolean>("install_forget", { taskId });
+      } catch {
+        /* 纯浏览器环境没有这个命令，忽略 */
+      }
+    },
+    [toast],
+  );
 
   /** 安装成功就把任务从队列里摘掉 */
   const reap = useCallback(
     (taskId: string) => {
+      if (reaping.current.has(taskId)) return;
+      reaping.current.add(taskId);
       const timer = window.setTimeout(() => {
+        reaping.current.delete(taskId);
         reapTimers.current = reapTimers.current.filter((id) => id !== timer);
         void dismiss(taskId);
       }, DONE_LINGER_MS);
@@ -85,15 +98,15 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * 收一条进度：数据写进 store，只在阶段跃迁时做副作用。
+   * 收一条进度：数据写进 store，提示只在阶段跃迁时弹。
    *
-   * 首次见到某个任务时不弹提示（避免重新挂载后补弹一堆历史消息），
-   * 同阶段内的进度变化也一律不弹。
+   * 但清场（`reap`）不看跃迁 —— 判据见下面 done 分支的注释，这是
+   * 「下载完了但卡片永远留在队列里」的根因之一。
    */
   const accept = useCallback(
     (view: TaskView) => {
       const { accepted, phaseChanged } = publishTask(view);
-      if (!accepted || !phaseChanged) return;
+      if (!accepted) return;
 
       // 单文件下载（Mod）带文件名，版本安装没有 → 用 id。别把 `mod:<fileId>` 露出来
       const name = view.title ?? view.versionId;
@@ -106,10 +119,13 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
         // 资源详情页的目标 / 文件列表同理：不在那一页时下完也要能看到「已安装」
         invalidate("resource_targets");
         invalidate("resource_files");
-        toast(`${name} 安装完成`, "success");
-        // 成功即清场：队列只留失败和取消，自己处理
+        // 提示只在真的跃迁时弹（同一条 done 可能重复到达）
+        if (phaseChanged) toast(`${name} 安装完成`, "success");
+        // 清场不看 `phaseChanged`：任务「第一次出现在 store 里就是 done」
+        // 时它是 false（`previous` 是 undefined），那种情况下定时器永远排不上，
+        // 卡片就永久留在队列里 —— 而它已经出队，点它连涟漪都不会有。
         reap(view.taskId);
-      } else if (view.phase === "failed") {
+      } else if (view.phase === "failed" && phaseChanged) {
         toast(`${name}：${view.failed} 个文件下载失败`, "error");
       }
     },
@@ -120,9 +136,12 @@ export function DownloadProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const list = await invoke<TaskView[]>("install_tasks");
-      for (const task of syncTasks(list)) {
-        // 界面启动前就完成的任务不补提示，但留一会儿后清掉
-        if (task.phase === "done") reap(task.taskId);
+      syncTasks(list);
+      // 按同步后的本地状态判断，而不是 `syncTasks` 的返回值：
+      // 那个只返回「新收进来的」，已经在队列里、这次才被更新成 done 的会被漏掉，
+      // 于是清场定时器不排，任务就永久挂在那儿。
+      for (const task of list) {
+        if (peekTask(task.taskId)?.phase === "done") reap(task.taskId);
       }
     } catch {
       /* 拿不到就算了，不影响主流程 */

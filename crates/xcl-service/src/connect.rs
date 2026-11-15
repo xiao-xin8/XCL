@@ -407,9 +407,23 @@ pub fn scan_minecraft_ports() -> Vec<u16> {
     for (pid, process) in system.processes() {
         let name = process.name().to_string_lossy().to_ascii_lowercase();
         // 用包含而不是枚举：JDK 自带的各种 java 变体名字不完全一样。
-        if name.contains("java") {
-            pids.push(pid.as_u32());
+        if !name.contains("java") {
+            continue;
         }
+        // Gradle / Kotlin 守护进程也叫 java.exe。只看进程名的话，它们监听的端口
+        // 会被当成游戏端口；Minecraft 客户端（原版 / Forge / Fabric）的命令行
+        // 一定带 --gameDir，用这个把两者区分开。
+        let cmdline = process
+            .cmd()
+            .iter()
+            .map(|arg| arg.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_ascii_lowercase();
+        if !cmdline.contains("--gamedir") {
+            continue;
+        }
+        pids.push(pid.as_u32());
     }
     if pids.is_empty() {
         return Vec::new();

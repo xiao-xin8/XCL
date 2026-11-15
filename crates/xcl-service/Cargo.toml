@@ -28,6 +28,9 @@ futures.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 zip.workspace = true
+flate2.workspace = true
+conic-worldmap.workspace = true
+png.workspace = true
 sysinfo.workspace = true
 
 [dev-dependencies]

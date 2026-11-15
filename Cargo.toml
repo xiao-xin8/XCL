@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*", "apps/desktop/src-tauri"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 # tauri-plugin-opener 2.7.2 要求 1.90，和前端 2.7.2 对齐
 rust-version = "1.90"
@@ -39,6 +39,12 @@ md-5 = "0.10"
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["rt"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# 解 level.dat 的 gzip。zip 已经在用同一份 flate2，单独引出来不增加编译负担。
+flate2 = "1"
+# 存档地图预览：读 region、解区块、按版本上色。只读，输出 RGBA。
+conic-worldmap = "0.1"
+# 渲染结果是裸 RGBA，用它编码 PNG。锁文件里本来就有（传递依赖）。
+png = "0.18"
 # 读取总物理内存，给「自动内存」用；跨平台
 sysinfo = "0.33"
 tauri-plugin-window-state = "2.5.0"

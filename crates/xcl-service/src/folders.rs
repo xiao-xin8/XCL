@@ -132,7 +132,7 @@ fn validate_version_id(version_id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-fn open_in_file_manager(path: &Path) -> Result<(), AppError> {
+pub(crate) fn open_in_file_manager(path: &Path) -> Result<(), AppError> {
     let program = if cfg!(windows) {
         "explorer"
     } else if cfg!(target_os = "macos") {

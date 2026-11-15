@@ -12,7 +12,7 @@
 # 迁移到新机器时，先把旧机器的密钥和数据库放到目标机的临时位置：
 #   scp old:/etc/xcld/xcld.env        new:/tmp/xcld.env.import
 #   scp old:/var/lib/xcld/xcl.db      new:/tmp/xcl.db.import
-# 本脚本见到这两个文件就会用它们，而不是重新生成。**密钥必须搬**：
+# 本脚本见到这两个文件就会用它们，而不是重新生成。密钥必须搬：
 # 客户端内置的是公钥，换了密钥所有登录态立刻作废。
 set -eu
 

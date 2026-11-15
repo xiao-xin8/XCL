@@ -32,6 +32,18 @@ const NUM = { fontVariantNumeric: "tabular-nums" } as const;
 /** 抽屉打开后多久让卡片开始落下（抽屉滑入 225ms，这里先走一半） */
 const CARD_REVEAL_DELAY_MS = 120;
 
+/**
+ * `leaving` 槽位的兜底摘除时间。
+ *
+ * 正常是「退场动画播完 → onExited → dropSlot」，但那条路依赖
+ * `anim.finished`：卡片没挂载（抽屉关着）、动画被 cancel、组件被卸载，
+ * 回调就永远不会来。槽位一旦卡在 `leaving`，那张卡会永久留在列表里，
+ * 而且 `pointerEvents: none` —— 点它没有任何反应，连涟漪都没有。
+ *
+ * 所以再挂一道时钟，比动画时长多留一截余量，到点无条件摘掉。
+ */
+const LEAVE_FALLBACK_MS = CARD_MOTION.exitDuration + 400;
+
 /** 一行「标签 + 值」的详细信息 */
 function InfoLine(props: { label: string; value: string }) {
   return (
@@ -370,7 +382,10 @@ export default function DownloadDock() {
       const next = prev.map((slot) => {
         const fresh = tasks.find((task) => task.taskId === slot.task.taskId);
         if (fresh) {
-          if (fresh === slot.task) return slot;
+          // 引用没变且本来就不在退场 → 不用动，省一次重渲染。
+          // 注意不能写成 `if (fresh === slot.task) return slot;` ——
+          // 那样 `leaving` 会永不复位，卡片一直不可点。
+          if (fresh === slot.task && !slot.leaving) return slot;
           changed = true;
           return { task: fresh, leaving: false };
         }
@@ -391,6 +406,54 @@ export default function DownloadDock() {
 
   const dropSlot = useCallback((taskId: string) => {
     setSlots((prev) => prev.filter((slot) => slot.task.taskId !== taskId));
+  }, []);
+
+  /**
+   * `leaving` 槽位的兜底摘除。
+   *
+   * 计时器挂在这里（Dock）而不是卡片里：抽屉关着的时候卡片根本没挂载，
+   * 挂在卡片上的定时器也不会存在。只要槽位还标着 `leaving`，这里就一定
+   * 会在 `LEAVE_FALLBACK_MS` 后把它摘掉，不依赖任何动画回调。
+   */
+  const leaveTimers = useRef(new Map<string, number>());
+  useEffect(() => {
+    const timers = leaveTimers.current;
+    // 槽位已经没了的，待办也撤掉（正常退场走完后会走到这里）
+    for (const [taskId, timer] of timers) {
+      if (!slots.some((slot) => slot.task.taskId === taskId)) {
+        window.clearTimeout(timer);
+        timers.delete(taskId);
+      }
+    }
+    for (const slot of slots) {
+      const taskId = slot.task.taskId;
+      if (!slot.leaving) {
+        // 任务回来了 / 正常退场结束：把待办撤掉
+        const timer = timers.get(taskId);
+        if (timer !== undefined) {
+          window.clearTimeout(timer);
+          timers.delete(taskId);
+        }
+        continue;
+      }
+      if (timers.has(taskId)) continue;
+      timers.set(
+        taskId,
+        window.setTimeout(() => {
+          timers.delete(taskId);
+          dropSlot(taskId);
+        }, LEAVE_FALLBACK_MS),
+      );
+    }
+  }, [slots, dropSlot]);
+
+  // 卸载时把待办全部清掉，别让定时器落在已经没了的状态上
+  useEffect(() => {
+    const timers = leaveTimers.current;
+    return () => {
+      for (const timer of timers.values()) window.clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
   // 抽屉刚打开时卡片是不存在的（opacity 0）。等抽屉滑进来一小段，

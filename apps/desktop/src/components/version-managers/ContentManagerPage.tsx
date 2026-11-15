@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import {
   Box,
@@ -24,7 +23,6 @@ import {
   TextField,
   Tooltip,
   Typography,
-  alpha,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlined";
@@ -46,6 +44,7 @@ import { playEnter } from "../../motion/pageMotion";
 import PageTransition from "../../motion/PageTransition";
 import ErrorState from "../ErrorState";
 import Loading from "../Loading";
+import MiniLabel from "../MiniLabel";
 import PillTabs from "../PillTabs";
 import { useToast } from "../Toast";
 import ContentDetailPage from "./ContentDetailPage";
@@ -689,22 +688,3 @@ const LocalContentCard = memo(function LocalContentCard(props: {
   );
 });
 
-function MiniLabel(props: { children: ReactNode; tone?: "warning" }) {
-  const warning = props.tone === "warning";
-  return (
-    <Typography
-      sx={{
-        fontSize: 9.5,
-        lineHeight: 1.6,
-        px: 0.6,
-        flexShrink: 0,
-        borderRadius: 999,
-        color: warning ? "warning.main" : "text.secondary",
-        bgcolor: (t) =>
-          alpha(warning ? t.palette.warning.main : t.palette.text.primary, warning ? 0.18 : 0.08),
-      }}
-    >
-      {props.children}
-    </Typography>
-  );
-}
